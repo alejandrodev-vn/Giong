@@ -440,6 +440,16 @@ impl Driver {
 
     // ------------------------------------------------------------------ park
 
+    /// `true` if completions are waiting to be collected: either already in
+    /// the completion queue, or as deferred kernel work that the next
+    /// `io_uring_enter` will turn into completions. Makes no system call.
+    pub(crate) fn has_completions(&mut self) -> bool {
+        if self.ring.submission().taskrun() {
+            return true;
+        }
+        !self.ring.completion().is_empty()
+    }
+
     fn arm_wake(&mut self) {
         let buf = &mut *self.wake_buf as *mut u64 as *mut u8;
         let sqe = opcode::Read::new(types::Fd(self.wake_fd), buf, 8)

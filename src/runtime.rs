@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
 use std::task::{Context, Poll, Waker};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use io_uring::{opcode, types};
 
@@ -143,6 +143,7 @@ impl RuntimeShared {
 
 #[derive(Clone)]
 struct Config {
+    spin: Option<Duration>,
     ring_entries: u32,
     buf_count: u16,
     buf_size: usize,
@@ -159,6 +160,8 @@ pub(crate) struct Worker {
     pub(crate) timers: RefCell<Timers>,
     pub(crate) pool: Rc<BufPool>,
     pub(crate) next_task_uid: Cell<u64>,
+    /// How long to busy-poll for new work before blocking in the kernel.
+    spin: Option<Duration>,
     /// Tasks on this worker waiting for a shutdown request.
     shutdown_waiters: RefCell<Slab<Waker>>,
 }
@@ -201,6 +204,7 @@ impl Worker {
             timers: RefCell::new(Timers::new()),
             pool,
             next_task_uid: Cell::new(1),
+            spin: cfg.spin,
             shutdown_waiters: RefCell::new(Slab::new()),
         }))
     }
@@ -259,42 +263,80 @@ impl Worker {
                 break;
             }
 
-            let mode = if !self.queue.borrow().is_empty() {
-                Park::Poll
-            } else {
-                match self.timers.borrow().next_deadline() {
-                    None => Park::Wait(None),
-                    Some(deadline) => {
-                        let now = Instant::now();
-                        if deadline <= now {
-                            Park::Poll
-                        } else {
-                            Park::Wait(Some(deadline - now))
-                        }
+            if !self.queue.borrow().is_empty() {
+                // More tasks are runnable: just exchange work with the kernel.
+                let graveyard = self.driver.borrow_mut().park(Park::Poll);
+                drop(graveyard);
+                self.fire_timers();
+                continue;
+            }
+
+            if let Some(spin) = self.spin {
+                // Hand queued submissions (responses!) to the kernel first, then
+                // watch for new work without giving up the CPU.
+                let graveyard = self.driver.borrow_mut().park(Park::Poll);
+                drop(graveyard);
+                self.fire_timers();
+                if !self.queue.borrow().is_empty() || self.spin_for_work(spin) {
+                    continue;
+                }
+            }
+
+            let wait = match self.timers.borrow().next_deadline() {
+                None => Park::Wait(None),
+                Some(deadline) => {
+                    let now = Instant::now();
+                    if deadline <= now {
+                        Park::Poll
+                    } else {
+                        Park::Wait(Some(deadline - now))
                     }
                 }
             };
-
-            let graveyard = match mode {
-                Park::Poll => self.driver.borrow_mut().park(Park::Poll),
-                wait => {
-                    // Announce that we are going to sleep, then re-check for
-                    // injected work (see `WorkerShared::inject`).
-                    self.shared.sleeping.store(true, Ordering::SeqCst);
-                    let mode = if self.shared.pending.load(Ordering::SeqCst) {
-                        Park::Poll
-                    } else {
-                        wait
-                    };
-                    let graveyard = self.driver.borrow_mut().park(mode);
-                    self.shared.sleeping.store(false, Ordering::SeqCst);
-                    graveyard
-                }
+            // Announce that we are going to sleep, then re-check for injected
+            // work (see `WorkerShared::inject`).
+            self.shared.sleeping.store(true, Ordering::SeqCst);
+            let mode = if self.shared.pending.load(Ordering::SeqCst) {
+                Park::Poll
+            } else {
+                wait
             };
+            let graveyard = self.driver.borrow_mut().park(mode);
+            self.shared.sleeping.store(false, Ordering::SeqCst);
             // Buffers of cancelled operations: dropped outside the driver borrow.
             drop(graveyard);
 
             self.fire_timers();
+        }
+    }
+
+    /// Busy-polls for up to `spin`. Returns `true` as soon as there is
+    /// something to do: a completion, a cross-thread wake-up or a due timer.
+    fn spin_for_work(&self, spin: Duration) -> bool {
+        let start = Instant::now();
+        let deadline = match self.timers.borrow().next_deadline() {
+            Some(timer) => timer.min(start + spin),
+            None => start + spin,
+        };
+        loop {
+            // Reading the clock costs about as much as the checks, so look at
+            // the ring many times per clock read.
+            for _ in 0..64 {
+                if self.shared.pending.load(Ordering::Relaxed)
+                    || self.driver.borrow_mut().has_completions()
+                {
+                    return true;
+                }
+                std::hint::spin_loop();
+            }
+            if Instant::now() >= deadline {
+                // A due timer is work; an expired spin budget is not.
+                return self
+                    .timers
+                    .borrow()
+                    .next_deadline()
+                    .is_some_and(|timer| timer <= Instant::now());
+            }
         }
     }
 
@@ -382,6 +424,7 @@ pub struct Builder {
     buf_count: u16,
     buf_size: usize,
     signals: bool,
+    spin: Option<Duration>,
 }
 
 impl Default for Builder {
@@ -401,6 +444,7 @@ impl Builder {
             buf_count: 512,
             buf_size: 8 * 1024,
             signals: false,
+            spin: None,
         }
     }
 
@@ -434,6 +478,21 @@ impl Builder {
         self
     }
 
+    /// Busy-poll for up to `duration` before a worker goes to sleep in the
+    /// kernel (default: never).
+    ///
+    /// A sleeping worker has to be woken by an interrupt and rescheduled
+    /// before it can react, which costs tens of microseconds — more inside a
+    /// virtual machine. While spinning, the worker notices new completions
+    /// within nanoseconds. This trades CPU for latency: a spinning worker
+    /// keeps its core busy even when there is nothing to do, so use it for
+    /// latency-sensitive services on dedicated cores, with a duration on the
+    /// order of the gaps between requests (tens to hundreds of microseconds).
+    pub fn spin_before_park(mut self, duration: Duration) -> Self {
+        self.spin = (!duration.is_zero()).then_some(duration);
+        self
+    }
+
     /// Request a runtime shutdown when the process receives SIGINT or SIGTERM
     /// (default: `false`). Only applies to [`Runtime::run`].
     pub fn shutdown_on_signals(mut self, enable: bool) -> Self {
@@ -443,6 +502,7 @@ impl Builder {
 
     fn config(&self) -> Config {
         Config {
+            spin: self.spin,
             ring_entries: self.ring_entries,
             buf_count: self.buf_count,
             buf_size: self.buf_size,
