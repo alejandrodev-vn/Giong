@@ -18,5 +18,6 @@ bench/** linguist-vendored=true
 
 # Binary files.
 *.png binary
+*.ico binary
 *.jpg binary
 *.bundle binary

@@ -59,6 +59,11 @@
 //! Linux 6.0 or newer (6.1+ recommended). giong does not build on other
 //! platforms.
 
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/thekivashyn/Giong/main/assets/giong-icon.svg",
+    html_favicon_url = "https://raw.githubusercontent.com/thekivashyn/Giong/main/assets/giong-icon.svg"
+)]
+
 #[cfg(not(target_os = "linux"))]
 compile_error!("giong only supports Linux: it is built directly on io_uring (kernel >= 6.0)");
 

@@ -1,10 +1,17 @@
-# giong
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/giong-logo-dark.svg">
+    <img alt="giong" src="assets/giong-logo-light.svg" width="340">
+  </picture>
+</p>
 
-**A thread-per-core async runtime for Linux, built directly on io_uring.**
+<p align="center"><b>A thread-per-core async runtime for Linux, built directly on io_uring.</b></p>
 
-[![CI](https://github.com/thekivashyn/Giong/actions/workflows/ci.yml/badge.svg)](https://github.com/thekivashyn/Giong/actions/workflows/ci.yml)
-![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)
-![Platform: Linux 6.0+](https://img.shields.io/badge/platform-Linux%206.0%2B-informational)
+<p align="center">
+  <a href="https://github.com/thekivashyn/Giong/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/thekivashyn/Giong/actions/workflows/ci.yml/badge.svg"></a>
+  <img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue">
+  <img alt="Platform: Linux 6.0+" src="https://img.shields.io/badge/platform-Linux%206.0%2B-informational">
+</p>
 
 Named after Thánh Gióng, the child of Vietnamese legend who lay silent for three years and
 then rose a giant: giong costs next to nothing while idle and uses every core the moment
@@ -387,6 +394,7 @@ examples/       echo.rs, http.rs, udp_echo.rs, cat.rs
 tests/          executor, time, net, udp, fs, cancel, multi, spin
 bench/          run.sh, scale.sh, syscalls.sh, eight servers, results/
 scripts/        valgrind.sh
+assets/         logo, icons, social preview (sources in assets/README.md)
 ```
 
 ## License

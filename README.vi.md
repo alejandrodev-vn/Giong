@@ -1,10 +1,17 @@
-# giong
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/giong-logo-dark.svg">
+    <img alt="giong" src="assets/giong-logo-light.svg" width="340">
+  </picture>
+</p>
 
-**Async runtime cho Linux theo mô hình thread-per-core, xây thẳng trên io_uring.**
+<p align="center"><b>Async runtime cho Linux theo mô hình thread-per-core, xây thẳng trên io_uring.</b></p>
 
-[![CI](https://github.com/thekivashyn/Giong/actions/workflows/ci.yml/badge.svg)](https://github.com/thekivashyn/Giong/actions/workflows/ci.yml)
-![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)
-![Platform: Linux 6.0+](https://img.shields.io/badge/platform-Linux%206.0%2B-informational)
+<p align="center">
+  <a href="https://github.com/thekivashyn/Giong/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/thekivashyn/Giong/actions/workflows/ci.yml/badge.svg"></a>
+  <img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue">
+  <img alt="Platform: Linux 6.0+" src="https://img.shields.io/badge/platform-Linux%206.0%2B-informational">
+</p>
 
 Tên lấy từ Thánh Gióng: nằm im ba năm, cất tiếng là vươn vai thành người khổng lồ. giong
 lúc rảnh gần như không tốn gì, có tải thì dùng hết mọi core.

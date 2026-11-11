@@ -8,6 +8,11 @@ version is `0.x`, a minor release (`0.1` → `0.2`) may contain breaking changes
 
 ## [Unreleased]
 
+### Added
+
+- Logo and brand assets in `assets/`; the README shows the logo for light and dark
+  themes, and the API documentation uses the giong icon.
+
 ## [0.1.0] - 2026-11-11
 
 First release: a thread-per-core async runtime for Linux on io_uring, with TCP, UDP, files,
