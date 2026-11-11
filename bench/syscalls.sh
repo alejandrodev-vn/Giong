@@ -3,7 +3,7 @@
 #   * system calls per request (strace -c), and
 #   * CPU time per request, split into user space and kernel.
 #
-#   bench/syscalls.sh
+#   bench/syscalls.sh                      (SERVERS="..." and ENDPOINT=users to vary)
 #
 # Requires: wrk, strace. Build first with bench/run.sh (or cargo build --release).
 set -euo pipefail
@@ -16,13 +16,15 @@ TICKS=$(getconf CLK_TCK)
 declare -A CMD=(
   [tokio-raw]="tokio-raw/target/release/bench-tokio-raw"
   [native-epoll]="native-epoll/target/release/bench-native-epoll"
+  [monoio]="monoio/target/release/bench-monoio"
+  [glommio]="glommio/target/release/bench-glommio"
   [giong]="../target/release/examples/http 127.0.0.1:3006"
 )
-declare -A PORT=([native-epoll]=3004 [tokio-raw]=3005 [giong]=3006)
+declare -A PORT=([native-epoll]=3004 [tokio-raw]=3005 [giong]=3006 [monoio]=3007 [glommio]=3008)
 
 cpu_ticks() { cat /proc/"$1"/task/*/stat | awk '{u+=$14; s+=$15} END{print u, s}'; }
 
-for s in tokio-raw native-epoll giong; do
+for s in ${SERVERS:-tokio-raw native-epoll monoio glommio giong}; do
   taskset -c "$SERVER_CPU" ${CMD[$s]} >/dev/null 2>&1 &
   pid=$!
   sleep 1

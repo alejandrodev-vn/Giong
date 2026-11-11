@@ -8,6 +8,17 @@ version is `0.x`, a minor release (`0.1` → `0.2`) may contain breaking changes
 
 ## [Unreleased]
 
+### Added
+
+- Benchmark servers for Monoio 0.2 and Glommio 0.9 (`bench/monoio`, `bench/glommio`) and
+  the results of a single-core comparison (`bench/results/io-uring-runtimes/`).
+- `bench/run.sh` accepts `SERVERS` and `OUT`; `bench/syscalls.sh` accepts `SERVERS`.
+
+### Changed
+
+- README: the `/json` result is now reported as no measurable difference from raw Tokio,
+  after a second run did not reproduce the earlier 8% lead.
+
 ## [0.1.0] - 2026-11-11
 
 First working version: a thread-per-core async runtime for Linux on io_uring, with TCP,

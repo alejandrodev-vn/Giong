@@ -31,7 +31,8 @@ find out what is actually true.
 - [ ] Benchmark on a multi-core machine with the load generator on a separate host and a
       physical network card.
 - [ ] Measure scaling from 1 to N workers.
-- [ ] Compare against Monoio and Glommio, not only against epoll-based servers.
+- [x] Compare against Monoio and Glommio on one core over loopback (see the README).
+- [ ] Repeat that comparison on several cores and a physical network.
 - [ ] Run the multi-threaded tests under ThreadSanitizer (nightly).
 - [ ] Model-check the cross-thread wake-up handshake with `loom`.
 - [ ] Run the test suite on kernel 6.0 and 6.1 to exercise the ring setup fallbacks.

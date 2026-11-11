@@ -1,0 +1,15 @@
+[package]
+name = "bench-monoio"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+monoio = "0.2"
+io-uring = "0.6"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[workspace]

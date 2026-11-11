@@ -3,6 +3,9 @@
 #
 #   bench/run.sh [rounds] [seconds-per-measurement]
 #
+#   SERVERS="giong monoio glommio tokio-raw" OUT=results/io-uring-runtimes bench/run.sh
+#       measures a subset and writes somewhere else.
+#
 # Method
 #   * The server is pinned to SERVER_CPU, the load generator (wrk) to LOAD_CPU,
 #     so every server gets exactly one core and never competes with wrk.
@@ -11,7 +14,8 @@
 #   * Each measurement is preceded by a warm-up; the report shows the median
 #     of all rounds plus the min/max, so you can see the noise.
 #
-# Requires: wrk, node, bun, cargo, python3. Results: bench/results/.
+# Requires: wrk, cargo, python3, and node / bun for those two servers.
+# Results: bench/results/ (or $OUT).
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -20,24 +24,26 @@ SECS=${2:-5}
 SERVER_CPU=${SERVER_CPU:-1}
 LOAD_CPU=${LOAD_CPU:-0}
 CONNS=${CONNS:-50}
-OUT=results
+OUT=${OUT:-results}
 mkdir -p "$OUT"
 CSV="$OUT/raw.csv"
 
 echo "building..." >&2
 (cd .. && cargo build --release --example http -q)
-for d in axum tokio-raw native-epoll; do (cd "$d" && cargo build --release -q); done
+for d in axum tokio-raw native-epoll monoio glommio; do (cd "$d" && cargo build --release -q); done
 
-NAMES=(node bun axum tokio-raw native-epoll giong)
+read -r -a NAMES <<<"${SERVERS:-node bun axum tokio-raw native-epoll monoio glommio giong}"
 declare -A CMD=(
   [node]="node node/server.js"
   [bun]="bun bun/server.js"
   [axum]="axum/target/release/bench-axum"
   [tokio-raw]="tokio-raw/target/release/bench-tokio-raw"
   [native-epoll]="native-epoll/target/release/bench-native-epoll"
+  [monoio]="monoio/target/release/bench-monoio"
+  [glommio]="glommio/target/release/bench-glommio"
   [giong]="../target/release/examples/http 127.0.0.1:3006"
 )
-declare -A PORT=([node]=3001 [bun]=3002 [axum]=3003 [native-epoll]=3004 [tokio-raw]=3005 [giong]=3006)
+declare -A PORT=([node]=3001 [bun]=3002 [axum]=3003 [native-epoll]=3004 [tokio-raw]=3005 [giong]=3006 [monoio]=3007 [glommio]=3008)
 
 echo "server,endpoint,round,rps,p50,p99,rss_kb" > "$CSV"
 for round in $(seq 1 "$ROUNDS"); do

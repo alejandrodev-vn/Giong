@@ -22,7 +22,7 @@ cargo test                                   # 62 test
 cargo run --release --example echo           # echo server, cổng 7000
 cargo run --release --example http           # HTTP server, cổng 3006
 curl localhost:3006/json
-bench/run.sh                                 # benchmark với 5 server khác (cần wrk, node, bun)
+bench/run.sh                                 # benchmark với 7 server khác (cần wrk, node, bun)
 ```
 
 ## Ví dụ
@@ -162,12 +162,29 @@ Sáu server cùng làm ba route, mỗi server chạy trên **một core**, `wrk`
 Cách đọc các con số này cho đúng:
 
 - **giong dùng ít syscall hơn khoảng 22 lần** (0,09 so với 2,04 mỗi request). Đây là kết quả chắc chắn nhất, đúng với mục tiêu thiết kế.
-- **`/json`: nhanh hơn Tokio thuần khoảng 8%, nhưng hai khoảng đo còn chồng lên nhau.** Thời gian kernel mỗi request gần như bằng nhau (4,8 so với 4,9 µs): với request nhỏ, phần tốn là TCP stack chứ không phải việc vào/ra kernel. Giảm syscall không cắt được phần này.
+- **`/json`: không có khác biệt đo được so với Tokio thuần.** Lượt đo này giong hơn khoảng 8%, lượt đo sau (bảng bên dưới) Tokio thuần lại nhỉnh hơn 2%; hai khoảng đo chồng lên nhau. Thời gian kernel mỗi request gần như bằng nhau (4,8 so với 4,9 µs): với request nhỏ, phần tốn là TCP stack chứ không phải việc vào/ra kernel. Giảm syscall không cắt được phần này.
 - **`/users`: nhanh hơn ~70%, nhưng phần lớn là do môi trường đo.** Khi cho server và `wrk` chạy chung một core, hai bên gần bằng nhau (Tokio 48–49k, giong 50–52k). Khoảng cách lớn chỉ xuất hiện khi chạy khác core: server epoll gửi từng response một, mỗi lần lại đánh thức vCPU đang rảnh của `wrk`, việc này rất đắt trong máy ảo. giong gửi cả lô trong một syscall nên đánh thức ít lần hơn. Lợi ích này có thật, nhưng trên máy thật với card mạng thật, mức chênh nhiều khả năng nhỏ hơn đáng kể.
 - **`/compute`: giong chậm hơn ~10%, không phải do runtime.** Mã máy của hàm `fib` trong hai binary giống hệt nhau, và độ trễ một request đơn của hai bên bằng nhau (24,8k so với 24,2k req/s với 1 kết nối). Nhiều khả năng do vị trí hàm trong binary (code alignment). Với việc nặng CPU, runtime nào cũng như nhau.
-- **Chưa đo:** nhiều core (máy thử chỉ có 2 vCPU, không đủ để tách server khỏi máy bắn tải), mạng thật, và so sánh với Monoio/Glommio.
+- **Chưa đo:** nhiều core (máy thử chỉ có 2 vCPU, không đủ để tách server khỏi máy bắn tải) và mạng thật.
 
 Chạy lại: `bench/run.sh [số vòng] [giây mỗi lần đo]`. Kết quả nằm ở `bench/results/`.
+
+### So với Monoio và Glommio
+
+Cùng ba route, cùng parser, viết trên Monoio 0.2.4 và Glommio 0.9.0 (`bench/monoio`, `bench/glommio`). Một lượt đo riêng, 5 vòng xen kẽ, trung vị (thấp nhất–cao nhất):
+
+| Server | `/json` | `/users` | `/compute` | Pipelining | Syscall mỗi request | RSS |
+|---|---|---|---|---|---|---|
+| **giong** | 147.8k (143–161k) | 56.8k (50–59k) | 5.1k | 1,51 triệu | 0,10 | 5,1 MB |
+| Monoio (mặc định) | 119.1k (114–123k) | 56.5k (52–58k) | 5.2k | 1,15 triệu | 0,08 | 4,2 MB |
+| Glommio | 111.4k (101–118k) | 32.2k (32–33k) | 4.4k | 1,04 triệu | 2,09 | 15,7 MB |
+| Tokio thuần | 150.9k (146–154k) | 34.6k (30–36k) | 4.8k | 1,45 triệu | 2,04 | 4,8 MB |
+
+- **giong và Monoio cùng một hạng.** Cả hai gom mọi thao tác vào `io_uring_enter` (dưới 0,1 syscall mỗi request) và hoà nhau ở `/users`.
+- **Khoảng cách ở `/json` là do cấu hình mặc định, không phải do thiết kế.** Monoio tạo ring không bật cờ nào. Truyền `COOP_TASKRUN` hoặc `DEFER_TASKRUN` qua `uring_builder` (hai dòng code) thì Monoio đạt 143–151k, ngang giong (`bench/results/io-uring-runtimes/monoio-ring-flags.txt`). giong bật sẵn `DEFER_TASKRUN`.
+- **Glommio ở hạng epoll trên đường mạng.** Nó thử `recv`/`send` trực tiếp trước rồi mới dùng io_uring để chờ, nên vẫn tốn 2 syscall mỗi request. Glommio được thiết kế cho lưu trữ (Direct I/O) và lập lịch theo độ ưu tiên, không tối ưu cho bài này.
+- **`/compute` của giong lượt này là 5,1k**, lượt trước 4,4k, sau khi binary đổi vì sửa tài liệu. Khớp với nhận định đây là nhiễu do vị trí mã trong binary.
+- Vẫn là một core, qua loopback, trong máy ảo. Bản crates.io mới nhất của Monoio là tháng 8/2024 và của Glommio là tháng 3/2024; nhánh chính của họ có thể đã khác.
 
 ## Giới hạn hiện tại
 
@@ -194,7 +211,7 @@ src/
   slab.rs       slab tối giản
 examples/       echo.rs, http.rs
 tests/          executor, time, net, cancel, multi
-bench/          run.sh, syscalls.sh, 5 server so sánh, results/
+bench/          run.sh, syscalls.sh, 7 server so sánh, results/
 scripts/        valgrind.sh
 .github/        CI và mẫu pull request
 ```

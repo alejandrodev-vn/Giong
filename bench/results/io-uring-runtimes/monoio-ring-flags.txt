@@ -1,0 +1,7 @@
+Monoio 0.2.4, /json, 1 core, 50 connections, 5 s per measurement, 3 interleaved rounds.
+MONOIO_RING selects the io_uring setup flags passed through RuntimeBuilder::uring_builder.
+
+ring flags                               req/s (3 runs)
+default (none)                           110548  121772  110360
+coop    (COOP_TASKRUN | TASKRUN_FLAG)    148140  145960  142711
+defer   (SINGLE_ISSUER | DEFER_TASKRUN)  149467  147601  150867
