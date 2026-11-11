@@ -1,0 +1,149 @@
+# Contributing to giong
+
+Thanks for taking an interest. This file explains how to build and test giong, what a
+change has to satisfy before it is merged, and how to write commits.
+
+## Before you start
+
+- For anything larger than a small fix, **open an issue first** and describe what you want
+  to change. It avoids duplicated work and patches that do not fit the design.
+- Check [ROADMAP.md](ROADMAP.md), including its non-goals.
+- Bugs: include the kernel version (`uname -r`), the Rust version, and the smallest
+  program that shows the problem.
+
+## Setting up
+
+You need **Linux with kernel 6.0 or newer** and a stable Rust toolchain. giong does not
+build on Windows or macOS; use WSL2 with a 6.x kernel, a virtual machine, or a container
+started with `--security-opt seccomp=unconfined` (Docker's default profile blocks io_uring).
+
+```bash
+cargo build
+cargo test
+cargo run --release --example http
+```
+
+## Checks every change must pass
+
+Continuous integration runs these, and so should you:
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+```
+
+If you touched `unsafe` code, buffer handling or the driver, also run:
+
+```bash
+scripts/valgrind.sh          # needs valgrind; takes a few minutes
+```
+
+## Rules for the code
+
+### Tests
+
+- A bug fix comes with a test that fails without the fix.
+- A new feature comes with tests for its normal path **and** for what happens when it is
+  interrupted (see cancellation below).
+- Tests must not depend on tight timing. Use generous upper bounds; CI machines are slow.
+
+### `unsafe`
+
+giong talks to the kernel, so some `unsafe` is unavoidable. Keep it small and justified.
+
+- Every `unsafe` block has a `// SAFETY:` comment stating why it is sound.
+- Prefer a safe design over a faster unsafe one unless a benchmark shows the difference
+  matters.
+- New `unsafe` code needs a test that would catch its misuse, and a clean valgrind run.
+
+### Cancellation safety
+
+This is the rule that is easiest to break. io_uring keeps using the memory an operation
+points at until the kernel reports completion, whatever happens to the Rust future.
+
+- Any new operation must keep its buffers alive until its final completion arrives, even
+  if its future is dropped first. Use `Op`, which already does this, rather than
+  submitting entries by hand.
+- State in the documentation of every new `async fn` whether it is cancel safe, meaning
+  whether dropping it can lose data.
+- Add a test that drops the operation while it is in flight and then checks
+  `giong::stats()` for leaked operations and buffers. `tests/cancel.rs` has examples.
+
+### Performance claims
+
+- A change described as faster needs numbers: before and after, from `bench/run.sh` or a
+  benchmark you add, with the machine and kernel stated.
+- Report the median of several runs and the spread, not the best run.
+- Say what you did not measure.
+
+### Dependencies and API
+
+- New dependencies need a reason. The runtime currently depends on three crates.
+- Public items need documentation. Breaking changes to the public API need an issue first
+  and an entry in the changelog.
+
+## Commits
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<scope>): <summary in the imperative, lower case, no full stop>
+
+<why the change is needed and what it does, wrapped at 72 columns>
+
+<footers, e.g. "Fixes #12" or "BREAKING CHANGE: ...">
+```
+
+**Types:** `feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `bench`, `ci`, `chore`.
+
+**Scopes:** `runtime`, `executor`, `driver`, `net`, `time`, `sync`, `buf`, `examples`,
+`bench`. Leave the scope out when a change spans several.
+
+Examples:
+
+```
+fix(driver): cancel a paused multishot receive when its stream is dropped
+feat(net): add UdpSocket
+perf(time): skip the timer wheel when no timer is armed
+docs: explain how to run under WSL2
+```
+
+- One logical change per commit. Formatting-only changes go in their own commit.
+- A breaking change is marked with `!` after the type or scope (`feat(net)!: ...`) and a
+  `BREAKING CHANGE:` footer.
+- The body explains *why*. The diff already shows *what*.
+
+## Pull requests
+
+1. Branch from `main`. Name the branch `<type>/<short-description>`, for example
+   `fix/recv-pause-on-drop`.
+2. Keep the pull request focused; several small ones are reviewed faster than one large one.
+3. Add a line under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md) for anything a user
+   would notice.
+4. Fill in the pull request template. Say how you tested the change.
+5. All checks must be green. A maintainer reviews and merges; pull requests are
+   squash-merged, so the pull request title must itself be a valid commit summary.
+
+## Releases
+
+Maintainers cut releases: move the `Unreleased` entries under a new version heading with
+the date, bump `version` in `Cargo.toml`, tag the commit `vX.Y.Z`, and publish.
+
+## Security
+
+Please do not open a public issue for a vulnerability such as a memory-safety bug that
+can be triggered remotely. Use GitHub's private vulnerability reporting on this
+repository (the "Security" tab) so it can be fixed before it is disclosed.
+
+## Conduct
+
+Be respectful and assume good faith. Criticise code, not people. Harassment and personal
+attacks are not tolerated, and maintainers may remove comments or block participants who
+ignore this.
+
+## Licensing of contributions
+
+giong is dual-licensed under MIT and Apache-2.0. Unless you state otherwise, any
+contribution you submit is licensed under the same terms, without additional conditions.

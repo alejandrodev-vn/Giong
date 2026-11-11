@@ -1,0 +1,15 @@
+tokio-raw       151437 req/s | per request: 0.64 us user + 4.87 us kernel = 5.51 us | kernel share 88%
+              2.040 syscalls per request (138752 calls / 68022 requests)
+                sendto           68071 calls
+                recvfrom         68122 calls
+                epoll_wait       2295 calls
+                epoll_ctl        102 calls
+native-epoll    145623 req/s | per request: 0.36 us user + 4.97 us kernel = 5.33 us | kernel share 93%
+              2.025 syscalls per request (156756 calls / 77416 requests)
+                write            77465 calls
+                read             77467 calls
+                epoll_wait       1566 calls
+                epoll_ctl        102 calls
+giong           156151 req/s | per request: 0.78 us user + 4.82 us kernel = 5.60 us | kernel share 86%
+              0.091 syscalls per request (52641 calls / 579667 requests)
+                io_uring_enter   52590 calls

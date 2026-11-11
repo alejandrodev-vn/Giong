@@ -1,0 +1,36 @@
+endpoint        server         req/s median       min       max   p50 ms   p99 ms
+json            node                  40751     40246     42282     1.20     2.86
+json            bun                  121487    113891    133809     0.34     1.15
+json            axum                 130796    122066    146412     0.31     1.26
+json            tokio-raw            145667    136302    151358     0.19     0.90
+json            native-epoll         141531    133439    142454     0.18     0.79
+json            giong                157532    141021    171800     0.17     0.80
+
+users           node                  15002     12901     15599     3.12     6.29
+users           bun                   18513     17940     19620     2.44     4.53
+users           axum                  17992     16365     18560     2.71     4.26
+users           tokio-raw             33993     33120     35733     1.45     2.37
+users           native-epoll          35212     33350     36688     1.40     2.54
+users           giong                 58226     53846     59475     0.78     1.79
+
+compute?n=25    node                   1243      1096      1327    35.41   632.06
+compute?n=25    bun                    2329      2057      2462    19.93    45.33
+compute?n=25    axum                   4759      4571      4868    10.53    15.70
+compute?n=25    tokio-raw              4985      4834      5052    10.18    14.20
+compute?n=25    native-epoll           4852      4796      4961     9.86    16.41
+compute?n=25    giong                  4403      4268      4861    10.52    16.35
+
+pipelined-json  node                  61406     58669     62840        -        -
+pipelined-json  bun                  108168    105006    116317        -        -
+pipelined-json  axum                  18204     18095     18219        -        -
+pipelined-json  tokio-raw           1493632   1411688   1532506        -        -
+pipelined-json  native-epoll        1497206   1385325   1559348        -        -
+pipelined-json  giong               1456814   1454175   1558665        -        -
+
+memory after load (RSS, MB, median):
+  node            84.4
+  bun             28.0
+  axum             4.9
+  tokio-raw        4.8
+  native-epoll     3.4
+  giong            5.1
