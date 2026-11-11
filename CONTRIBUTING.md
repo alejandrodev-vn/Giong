@@ -98,8 +98,8 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 **Types:** `feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `bench`, `ci`, `chore`.
 
-**Scopes:** `runtime`, `executor`, `driver`, `net`, `time`, `sync`, `buf`, `examples`,
-`bench`. Leave the scope out when a change spans several.
+**Scopes:** `runtime`, `executor`, `driver`, `net`, `fs`, `time`, `sync`, `buf`,
+`examples`, `bench`. Leave the scope out when a change spans several.
 
 Examples:
 

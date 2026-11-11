@@ -8,20 +8,9 @@ version is `0.x`, a minor release (`0.1` → `0.2`) may contain breaking changes
 
 ## [Unreleased]
 
-### Added
-
-- Benchmark servers for Monoio 0.2 and Glommio 0.9 (`bench/monoio`, `bench/glommio`) and
-  the results of a single-core comparison (`bench/results/io-uring-runtimes/`).
-- `bench/run.sh` accepts `SERVERS` and `OUT`; `bench/syscalls.sh` accepts `SERVERS`.
-
-### Changed
-
-- README: the `/json` result is now reported as no measurable difference from raw Tokio,
-  after a second run did not reproduce the earlier 8% lead.
-
 ## [0.1.0] - 2026-11-11
 
-First working version: a thread-per-core async runtime for Linux on io_uring, with TCP,
+First release: a thread-per-core async runtime for Linux on io_uring, with TCP, UDP, files,
 timers and cross-thread messaging. Not production-tested; see the limitations in the README.
 
 ### Added
@@ -34,6 +23,9 @@ timers and cross-thread messaging. Not production-tested; see the limitations in
   - Graceful shutdown: `shutdown_signal()`, `until_shutdown(fut)`, and
     `Builder::shutdown_on_signals` for SIGINT / SIGTERM.
   - A panic in a worker's main future stops the runtime and is propagated to the caller.
+  - `Builder::spin_before_park`: an opt-in busy-poll mode that trades CPU for latency. A
+    worker watches its ring for a while before sleeping, so it reacts to a request without
+    a wake-up from the kernel.
 - **Tasks**
   - `spawn` for `!Send` futures, `JoinHandle` (await, `abort`, `is_finished`), `JoinError`,
     `yield_now`.
@@ -44,8 +36,14 @@ timers and cross-thread messaging. Not production-tested; see the limitations in
     `set_nodelay`, `peer_addr`, `local_addr`, `from_std`).
   - `recv` uses multishot receive with a kernel-provided buffer ring and returns a
     `RecvBuf` borrowed from the worker's pool.
+  - `UdpSocket` (`bind`, `connect`, `send`, `recv`, `send_to`, `recv_from`, `from_std`),
+    IPv4 and IPv6.
   - Ownership-passing buffer traits `IoBuf` / `IoBufMut`, implemented for `Vec<u8>`,
     `String`, `Box<[u8]>`, `Rc<[u8]>`, `Arc<[u8]>`, `&'static [u8]` and `&'static str`.
+- **Files**
+  - `fs::File` and `fs::OpenOptions`: open, positional `read_at` / `write_at` /
+    `write_all_at`, `sync_all`, `sync_data`, `close`. Every operation goes through the
+    ring; there is no blocking thread pool.
 - **Time**
   - `sleep`, `sleep_until`, `timeout`, backed by a six-level hierarchical timing wheel
     with 1 ms resolution. Timers never fire early.
@@ -61,16 +59,18 @@ timers and cross-thread messaging. Not production-tested; see the limitations in
     paused and its backlog is moved off the shared pool.
   - A multishot accept pauses once 1024 accepted connections are waiting.
   - On shutdown every operation is cancelled and awaited before memory is released.
-- **Examples**: `echo` and `http` (HTTP/1.1 with keep-alive, pipelining, idle and write
-  timeouts, size limits).
-- **Benchmarks**: `bench/run.sh` and `bench/syscalls.sh`, with five reference servers
-  (Node.js, Bun, Axum, raw Tokio, hand-written epoll) and the recorded results.
+- **Examples**: `echo`, `http` (HTTP/1.1 with keep-alive, pipelining, idle and write
+  timeouts, size limits), `udp_echo` and `cat`.
+- **Benchmarks**: `bench/run.sh` (throughput), `bench/scale.sh` (one connection to
+  thousands, with CPU time per request) and `bench/syscalls.sh`, with seven reference
+  servers (Node.js, Bun, Axum, raw Tokio, hand-written epoll, Monoio, Glommio) and the
+  recorded results.
 - **Tests**: 62 tests covering the executor, timers, TCP, cancellation, buffer exhaustion
   and multi-worker behaviour; `scripts/valgrind.sh` for a memcheck pass.
 
 ### Known limitations
 
-- TCP only: no UDP, Unix sockets, file I/O or asynchronous DNS.
+- No Unix sockets and no asynchronous DNS (`bind` and `connect` resolve names blocking).
 - No TLS and no HTTP/2.
 - Not compatible with crates that require the Tokio runtime.
 - Tasks never migrate between workers.

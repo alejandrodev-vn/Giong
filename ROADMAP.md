@@ -20,8 +20,8 @@ These are deliberate. Proposals that need them will be declined.
 
 ## 0.1 — Foundation (released)
 
-Executor, io_uring driver, TCP, timers, thread-per-core runtime, cross-thread channel,
-cancellation safety, backpressure, tests and benchmarks. See [CHANGELOG.md](CHANGELOG.md).
+Executor, io_uring driver, TCP, UDP, files, timers, thread-per-core runtime, busy-poll
+mode, cross-thread channel, cancellation safety, backpressure, tests and benchmarks. See [CHANGELOG.md](CHANGELOG.md).
 
 ## 0.2 — Prove it
 
@@ -50,15 +50,15 @@ What a real server needs beyond TCP.
 - [ ] Graceful connection draining on shutdown (wait for requests in progress, with a
       deadline).
 - [ ] Vectored writes (`writev`) so a response head and body need no copy.
-- [ ] UDP sockets.
 - [ ] Unix domain sockets.
-- [ ] File I/O (open, read, write, fsync, close).
+- [ ] More file operations: metadata, rename, remove, directories, `fallocate`.
+- [ ] Multishot receive for UDP.
 - [ ] Asynchronous DNS resolution (today `bind` and `connect` resolve names blocking).
 - [ ] A bounded channel and a oneshot channel in `sync`.
 - [ ] `spawn_on` that returns a handle to the spawned task's result.
 
-**Exit criteria:** the echo and HTTP examples plus one UDP and one file example, each with
-tests, including cancellation tests for every new operation.
+**Exit criteria:** every item above with tests, including cancellation tests for each new
+operation.
 
 ## 0.4 — Speed
 
