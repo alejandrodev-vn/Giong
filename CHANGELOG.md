@@ -78,3 +78,6 @@ timers and cross-thread messaging. Not production-tested; see the limitations in
 - Not yet measured on more than one core or on a physical network.
 - The declared minimum Rust version (1.80) and the fallback paths for kernel 6.0 have not
   been exercised yet.
+
+[Unreleased]: https://github.com/thekivashyn/Giong/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/thekivashyn/Giong/releases/tag/v0.1.0

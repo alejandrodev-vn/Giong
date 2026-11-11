@@ -2,6 +2,10 @@
 
 **Async runtime cho Linux theo mô hình thread-per-core, xây thẳng trên io_uring.**
 
+[![CI](https://github.com/thekivashyn/Giong/actions/workflows/ci.yml/badge.svg)](https://github.com/thekivashyn/Giong/actions/workflows/ci.yml)
+![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)
+![Platform: Linux 6.0+](https://img.shields.io/badge/platform-Linux%206.0%2B-informational)
+
 Tên lấy từ Thánh Gióng: nằm im ba năm, cất tiếng là vươn vai thành người khổng lồ. giong
 lúc rảnh gần như không tốn gì, có tải thì dùng hết mọi core.
 
@@ -70,6 +74,7 @@ Cách đọc cho đúng:
 ## Chạy thử
 
 ```bash
+git clone https://github.com/thekivashyn/Giong.git && cd Giong
 cargo test                              # toàn bộ test
 cargo run --release --example echo      # echo server, cổng 7000
 cargo run --release --example http      # HTTP server, cổng 3006
@@ -123,6 +128,7 @@ fn main() -> std::io::Result<()> {
 
 ## Tài liệu khác
 
+- Mã nguồn và issue: <https://github.com/thekivashyn/Giong>
 - [README.md](README.md): thiết kế chi tiết, benchmark đầy đủ, kiểm thử, so sánh với Monoio và Glommio.
 - [CONTRIBUTING.md](CONTRIBUTING.md), [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md).
 

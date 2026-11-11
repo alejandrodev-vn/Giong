@@ -2,6 +2,10 @@
 
 **A thread-per-core async runtime for Linux, built directly on io_uring.**
 
+[![CI](https://github.com/thekivashyn/Giong/actions/workflows/ci.yml/badge.svg)](https://github.com/thekivashyn/Giong/actions/workflows/ci.yml)
+![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)
+![Platform: Linux 6.0+](https://img.shields.io/badge/platform-Linux%206.0%2B-informational)
+
 Named after Thánh Gióng, the child of Vietnamese legend who lay silent for three years and
 then rose a giant: giong costs next to nothing while idle and uses every core the moment
 load arrives.
@@ -66,6 +70,7 @@ connection, the same as the others.
 ## Quick start
 
 ```bash
+git clone https://github.com/thekivashyn/Giong.git && cd Giong
 cargo test                              # the whole suite
 cargo run --release --example echo      # TCP echo server on port 7000
 cargo run --release --example http      # HTTP/1.1 server on port 3006
@@ -360,6 +365,7 @@ latency dial, and code small enough to audit.
 
 ## Project
 
+- Source, issues and discussions: <https://github.com/thekivashyn/Giong>
 - [CONTRIBUTING.md](CONTRIBUTING.md) — building, required checks, the rules for `unsafe`
   and cancellation, commit conventions.
 - [ROADMAP.md](ROADMAP.md) — milestones and deliberate non-goals.
