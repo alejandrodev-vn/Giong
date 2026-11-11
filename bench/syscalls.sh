@@ -18,9 +18,10 @@ declare -A CMD=(
   [native-epoll]="native-epoll/target/release/bench-native-epoll"
   [monoio]="monoio/target/release/bench-monoio"
   [glommio]="glommio/target/release/bench-glommio"
-  [giong]="../target/release/examples/http 127.0.0.1:3006"
+  [monoio-tuned]="env MONOIO_RING=defer monoio/target/release/bench-monoio"
+  [giong]="giong/target/release/bench-giong"
 )
-declare -A PORT=([native-epoll]=3004 [tokio-raw]=3005 [giong]=3006 [monoio]=3007 [glommio]=3008)
+declare -A PORT=([native-epoll]=3004 [tokio-raw]=3005 [giong]=3006 [monoio]=3007 [monoio-tuned]=3007 [glommio]=3008)
 
 cpu_ticks() { cat /proc/"$1"/task/*/stat | awk '{u+=$14; s+=$15} END{print u, s}'; }
 

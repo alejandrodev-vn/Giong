@@ -29,10 +29,9 @@ mkdir -p "$OUT"
 CSV="$OUT/raw.csv"
 
 echo "building..." >&2
-(cd .. && cargo build --release --example http -q)
-for d in axum tokio-raw native-epoll monoio glommio; do (cd "$d" && cargo build --release -q); done
+for d in giong axum tokio-raw native-epoll monoio glommio; do (cd "$d" && cargo build --release -q); done
 
-read -r -a NAMES <<<"${SERVERS:-node bun axum tokio-raw native-epoll monoio glommio giong}"
+read -r -a NAMES <<<"${SERVERS:-node bun axum tokio-raw native-epoll glommio monoio monoio-tuned giong}"
 declare -A CMD=(
   [node]="node node/server.js"
   [bun]="bun bun/server.js"
@@ -41,9 +40,10 @@ declare -A CMD=(
   [native-epoll]="native-epoll/target/release/bench-native-epoll"
   [monoio]="monoio/target/release/bench-monoio"
   [glommio]="glommio/target/release/bench-glommio"
-  [giong]="../target/release/examples/http 127.0.0.1:3006"
+  [monoio-tuned]="env MONOIO_RING=defer monoio/target/release/bench-monoio"
+  [giong]="giong/target/release/bench-giong"
 )
-declare -A PORT=([node]=3001 [bun]=3002 [axum]=3003 [native-epoll]=3004 [tokio-raw]=3005 [giong]=3006 [monoio]=3007 [glommio]=3008)
+declare -A PORT=([node]=3001 [bun]=3002 [axum]=3003 [native-epoll]=3004 [tokio-raw]=3005 [giong]=3006 [monoio]=3007 [monoio-tuned]=3007 [glommio]=3008)
 
 echo "server,endpoint,round,rps,p50,p99,rss_kb" > "$CSV"
 for round in $(seq 1 "$ROUNDS"); do

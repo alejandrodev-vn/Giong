@@ -1,36 +1,51 @@
 endpoint        server         req/s median       min       max   p50 ms   p99 ms
-json            node                  40751     40246     42282     1.20     2.86
-json            bun                  121487    113891    133809     0.34     1.15
-json            axum                 130796    122066    146412     0.31     1.26
-json            tokio-raw            145667    136302    151358     0.19     0.90
-json            native-epoll         141531    133439    142454     0.18     0.79
-json            giong                157532    141021    171800     0.17     0.80
+json            node                  40323     38551     42744     1.21     3.40
+json            bun                  122991    102598    130433     0.34     1.15
+json            axum                 134902    122266    144375     0.31     1.06
+json            tokio-raw            144311    138798    155881     0.18     0.75
+json            native-epoll         145758    131839    148242     0.17     0.92
+json            glommio              121185    116180    124946     0.35     0.97
+json            monoio               121521    110192    124243     0.27     0.63
+json            monoio-tuned         156631    142480    157879     0.18     0.63
+json            giong                148394    141444    158735     0.18     0.95
 
-users           node                  15002     12901     15599     3.12     6.29
-users           bun                   18513     17940     19620     2.44     4.53
-users           axum                  17992     16365     18560     2.71     4.26
-users           tokio-raw             33993     33120     35733     1.45     2.37
-users           native-epoll          35212     33350     36688     1.40     2.54
-users           giong                 58226     53846     59475     0.78     1.79
+users           node                  15157     14672     15739     3.09     5.36
+users           bun                   18130     14847     19852     2.46     4.41
+users           axum                  18415     17246     19073     2.74     3.91
+users           tokio-raw             35198     34371     37289     1.45     2.30
+users           native-epoll          34672     27992     35966     1.39     2.79
+users           glommio               32825     29733     34044     1.46     2.71
+users           monoio                60403     52826     60518     0.74     1.58
+users           monoio-tuned          59519     57291     59772     0.75     1.55
+users           giong                 56258     52883     57719     0.80     2.28
 
-compute?n=25    node                   1243      1096      1327    35.41   632.06
-compute?n=25    bun                    2329      2057      2462    19.93    45.33
-compute?n=25    axum                   4759      4571      4868    10.53    15.70
-compute?n=25    tokio-raw              4985      4834      5052    10.18    14.20
-compute?n=25    native-epoll           4852      4796      4961     9.86    16.41
-compute?n=25    giong                  4403      4268      4861    10.52    16.35
+compute?n=25    node                   1256      1071      1385    36.11   570.85
+compute?n=25    bun                    2283      1968      2442    20.31    40.39
+compute?n=25    axum                   4771      4675      4855    10.42    15.00
+compute?n=25    tokio-raw              4850      4423      5074    10.31    14.90
+compute?n=25    native-epoll           4886      4706      5045     9.89    17.28
+compute?n=25    glommio                5145      5040      5563     9.35    13.22
+compute?n=25    monoio                 5261      4831      5546     8.94    13.28
+compute?n=25    monoio-tuned           5414      5162      5464     8.86    15.46
+compute?n=25    giong                  5392      5191      5499     8.86    15.73
 
-pipelined-json  node                  61406     58669     62840        -        -
-pipelined-json  bun                  108168    105006    116317        -        -
-pipelined-json  axum                  18204     18095     18219        -        -
-pipelined-json  tokio-raw           1493632   1411688   1532506        -        -
-pipelined-json  native-epoll        1497206   1385325   1559348        -        -
-pipelined-json  giong               1456814   1454175   1558665        -        -
+pipelined-json  node                  60874     52220     62139        -        -
+pipelined-json  bun                  113211     81539    119238        -        -
+pipelined-json  axum                  18227     18183     18238        -        -
+pipelined-json  tokio-raw           1493396   1401163   1567283        -        -
+pipelined-json  native-epoll        1445992   1380792   1488112        -        -
+pipelined-json  glommio             1056495   1004862   1111445        -        -
+pipelined-json  monoio              1136691   1087690   1228115        -        -
+pipelined-json  monoio-tuned        1482599   1394559   1545043        -        -
+pipelined-json  giong               1461052   1432072   1515651        -        -
 
 memory after load (RSS, MB, median):
-  node            84.4
-  bun             28.0
+  node            84.6
+  bun             28.1
   axum             4.9
   tokio-raw        4.8
-  native-epoll     3.4
-  giong            5.1
+  native-epoll     3.3
+  glommio         15.8
+  monoio           4.2
+  monoio-tuned     4.1
+  giong            6.0

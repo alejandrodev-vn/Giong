@@ -110,7 +110,12 @@ async fn serve(mut stream: TcpStream) {
 
 fn main() {
     // Not pinned here: the benchmark script pins the process with taskset.
-    LocalExecutorBuilder::new(Placement::Unbound)
+    // GLOMMIO_SPIN_US=<microseconds> turns on busy-polling before sleeping.
+    let mut builder = LocalExecutorBuilder::new(Placement::Unbound);
+    if let Some(us) = std::env::var("GLOMMIO_SPIN_US").ok().and_then(|v| v.parse().ok()) {
+        builder = builder.spin_before_park(std::time::Duration::from_micros(us));
+    }
+    builder
         .spawn(|| async move {
             let listener = TcpListener::bind("127.0.0.1:3008").expect("bind");
             loop {
