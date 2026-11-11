@@ -1,1 +1,22 @@
+# Build output (the crate and every benchmark server).
 target/
+**/target/
+
+# Editors and operating systems.
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Profiling and debugging leftovers.
+callgrind.out.*
+massif.out.*
+perf.data*
+vgcore.*
+*.profraw
+
+# Local setup helpers.
+*.bundle
+setup-git.cmd

@@ -1,0 +1,22 @@
+# Normalise line endings: the repository always stores LF.
+* text=auto eol=lf
+
+# Shell scripts must keep LF even when checked out on Windows, or bash fails.
+*.sh text eol=lf
+
+# Windows scripts keep CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Lock files and recorded benchmark output: not worth reviewing line by line.
+Cargo.lock linguist-generated=true -diff
+bench/results/** linguist-generated=true
+
+# Benchmark comparators are not part of the library's language statistics.
+bench/** linguist-vendored=true
+
+# Binary files.
+*.png binary
+*.jpg binary
+*.bundle binary
