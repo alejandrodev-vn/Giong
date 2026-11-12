@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>giong: a thread-per-core async runtime for Linux on io_uring</title>
+<meta name="description" content="giong is a thread-per-core async runtime for Rust on Linux, built directly on io_uring. One syscall per tick, not per operation. TCP, UDP, Unix sockets, files, HTTP/1.1 and TLS.">
+<link rel="canonical" href="https://giong.run/">
+<meta name="theme-color" content="#0A0C10" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F4F6F9" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="giong">
+<meta property="og:title" content="giong: a thread-per-core async runtime for Linux on io_uring">
+<meta property="og:description" content="giong is a thread-per-core async runtime for Rust on Linux, built directly on io_uring. One syscall per tick, not per operation. TCP, UDP, Unix sockets, files, HTTP/1.1 and TLS.">
+<meta property="og:url" content="https://giong.run/">
+<meta property="og:image" content="https://giong.run/assets/social-preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/favicon.ico" sizes="any">
+<link rel="icon" href="assets/giong-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/giong-icon-180.png">
+<link rel="preload" href="fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="styles.css">
+<script>document.documentElement.classList.add("js")</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="#" aria-label="giong"><picture><source media="(prefers-color-scheme: light)" srcset="assets/giong-mark-light.svg"><img src="assets/giong-mark.svg" alt="" width="32" height="32"></picture><span>giong</span></a>
+    <nav class="nav-links" aria-label="Sections"><a href="#why">Why</a><a href="#numbers">Numbers</a><a href="#code">Code</a><a href="#design">Design</a><a href="#crates">Crates</a><a href="#limits">Limits</a></nav>
+    <div class="nav-side">
+      <a class="btn btn-sm" href="https://github.com/giong-run/Giong"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg><span>GitHub</span></a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <p class="status"><span><b>v0.2</b></span><span>Linux 6.0+</span><span>Rust 1.80+</span><span>MIT OR Apache-2.0</span></p>
+      <h1>One syscall per tick, <em>not per operation.</em></h1>
+      <p class="lede">giong is a thread-per-core async runtime for Rust on Linux, built directly on io_uring. Every read, write, accept and close that one turn of the event loop produces enters the kernel in <strong>a single <code>io_uring_enter</code></strong>.</p>
+      <div class="cta">
+        <a class="btn btn-main" href="#start">Run it</a>
+        <a class="btn" href="#numbers">See the numbers</a>
+      </div>
+      <div class="cmd"><code id="clone">git clone https://github.com/giong-run/Giong.git</code><button class="copy" type="button" data-copy="clone" data-done="copied">copy</button></div>
+    </div>
+
+    <figure class="tick" id="tick" data-unit1="syscall this tick" data-unitn="syscalls this tick">
+      <div class="tick-ring" role="img" aria-label="Illustration: the operations of one turn of the event loop enter the kernel in one system call.">
+        <svg viewBox="0 0 400 400" aria-hidden="true"><path class="seg on a1" d="M62.2 330.8A190 190 0 0 1 38.0 299.3L70.4 279.4A152 152 0 0 0 89.7 304.6Z"/><path class="seg on a2" d="M33.0 290.7A190 190 0 0 1 17.8 254.0L54.3 243.2A152 152 0 0 0 66.4 272.5Z"/><path class="seg on a3" d="M15.2 244.4A190 190 0 0 1 10.1 205.0L48.1 204.0A152 152 0 0 0 52.2 235.5Z"/><path class="seg on" d="M10.1 195.0A190 190 0 0 1 15.2 155.6L52.2 164.5A152 152 0 0 0 48.1 196.0Z"/><path class="seg on" d="M17.8 146.0A190 190 0 0 1 33.0 109.3L66.4 127.5A152 152 0 0 0 54.3 156.8Z"/><path class="seg on" d="M38.0 100.7A190 190 0 0 1 62.2 69.2L89.7 95.4A152 152 0 0 0 70.4 120.6Z"/><path class="seg on" d="M69.2 62.2A190 190 0 0 1 100.7 38.0L120.6 70.4A152 152 0 0 0 95.4 89.7Z"/><path class="seg on" d="M109.3 33.0A190 190 0 0 1 146.0 17.8L156.8 54.3A152 152 0 0 0 127.5 66.4Z"/><path class="seg on" d="M155.6 15.2A190 190 0 0 1 195.0 10.1L196.0 48.1A152 152 0 0 0 164.5 52.2Z"/><path class="seg on" d="M205.0 10.1A190 190 0 0 1 244.4 15.2L235.5 52.2A152 152 0 0 0 204.0 48.1Z"/><path class="seg on" d="M254.0 17.8A190 190 0 0 1 290.7 33.0L272.5 66.4A152 152 0 0 0 243.2 54.3Z"/><path class="seg on" d="M299.3 38.0A190 190 0 0 1 330.8 62.2L304.6 89.7A152 152 0 0 0 279.4 70.4Z"/><path class="seg on" d="M337.8 69.2A190 190 0 0 1 362.0 100.7L329.6 120.6A152 152 0 0 0 310.3 95.4Z"/><path class="seg on" d="M367.0 109.3A190 190 0 0 1 382.2 146.0L345.7 156.8A152 152 0 0 0 333.6 127.5Z"/><path class="seg" d="M384.8 155.6A190 190 0 0 1 389.9 195.0L351.9 196.0A152 152 0 0 0 347.8 164.5Z"/><path class="seg" d="M389.9 205.0A190 190 0 0 1 384.8 244.4L347.8 235.5A152 152 0 0 0 351.9 204.0Z"/><path class="seg" d="M382.2 254.0A190 190 0 0 1 367.0 290.7L333.6 272.5A152 152 0 0 0 345.7 243.2Z"/><path class="seg" d="M362.0 299.3A190 190 0 0 1 337.8 330.8L310.3 304.6A152 152 0 0 0 329.6 279.4Z"/><path class="seg" d="M330.8 337.8A190 190 0 0 1 299.3 362.0L279.4 329.6A152 152 0 0 0 304.6 310.3Z"/><path class="seg" d="M290.7 367.0A190 190 0 0 1 254.0 382.2L243.2 345.7A152 152 0 0 0 272.5 333.6Z"/><path class="seg" d="M244.4 384.8A190 190 0 0 1 205.0 389.9L204.0 351.9A152 152 0 0 0 235.5 347.8Z"/><path class="seg" d="M195.0 389.9A190 190 0 0 1 155.6 384.8L164.5 347.8A152 152 0 0 0 196.0 351.9Z"/><path class="seg" d="M146.0 382.2A190 190 0 0 1 109.3 367.0L127.5 333.6A152 152 0 0 0 156.8 345.7Z"/><path class="seg" d="M100.7 362.0A190 190 0 0 1 69.2 337.8L95.4 310.3A152 152 0 0 0 120.6 329.6Z"/></svg>
+        <div class="tick-core" aria-hidden="true">
+          <span class="tick-ops"><b data-ops>14</b> operations queued</span>
+          <span class="tick-num" data-sys>1</span>
+          <span class="tick-unit" data-unit>syscall this tick</span>
+        </div>
+      </div>
+      <div class="vs" aria-hidden="true">
+        <div class="vs-row is-giong"><span>giong</span><span class="vs-marks" data-marks-giong><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><b data-n-giong>1</b></div>
+        <div class="vs-row"><span>epoll style</span><span class="vs-marks" data-marks-epoll><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i></span><b data-n-epoll>14</b></div>
+      </div>
+      <figcaption>One turn of the event loop, drawn to explain the mechanism. Measured on <code>/json</code> at 50 connections: 0.03 system calls per request for giong, 2.05 for raw Tokio. <a href="https://github.com/giong-run/Giong/blob/main/bench/syscalls.sh">bench/syscalls.sh</a></figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="legend">
+  <div class="wrap legend-in">
+    <p>Named after <strong>Thánh Gióng</strong>, the child of Vietnamese legend who lay silent for three years and then rose a giant. giong costs next to nothing while idle and uses every core the moment load arrives.</p>
+    <dl class="idle"><div><dt>5,400<small>lines</small></dt><dd>of source in the runtime, with a comment on every <code>unsafe</code> block</dd></div><div><dt>3</dt><dd>dependencies: <code>io-uring</code>, <code>libc</code>, <code>socket2</code></dd></div><div><dt>169<small>tests</small></dt><dd>passing on three io_uring setups, clean under ThreadSanitizer and valgrind</dd></div><div><dt>5.6<small>MB</small></dt><dd>resident memory after the 50-connection benchmark</dd></div></dl>
+  </div>
+</section>
+
+<section class="sec" id="why">
+  <div class="wrap">
+    <header class="sec-head"><p class="eyebrow">why</p><h2>Where the design pays off</h2><p class="sec-lede">giong commits to io_uring and to one thread per core, and to nothing else. These are the six things that buys.</p></header>
+    <div class="pillars"><article class="pillar"><p class="tag">io_uring_enter · DEFER_TASKRUN · SINGLE_ISSUER</p><h3>One syscall per tick</h3><p>Every read, write, accept, close and cancellation a turn of the loop produces enters the kernel together, and every ready completion comes back in the same call. A request costs about <strong>0.03 system calls</strong>; an epoll-based server needs 2.</p></article><article class="pillar"><p class="tag">multishot accept · multishot recv · provided buffers</p><h3>Idle connections hold no buffer</h3><p>One submission lasts the life of a listener or connection. The kernel picks a buffer only when data arrives, so it is still warm in cache. At <strong>5,000 connections</strong> giong spends the least CPU per request of the runtimes measured.</p></article><article class="pillar"><p class="tag">tests/cancel.rs</p><h3>Cancel safe by construction</h3><p>Drop an I/O future mid-flight and its buffer moves to the driver until the kernel confirms the cancel. A <code>timeout</code> around <code>recv</code>, <code>recv_from</code> or <code>accept</code> loses no data, datagram or connection.</p></article><article class="pillar"><p class="tag">Builder::spin_before_park</p><h3>A latency dial</h3><p>Let a worker watch its ring for a while before it sleeps. On a single connection that is <strong>19 µs median instead of 28</strong> and 48% more requests. It costs CPU, so it is off by default.</p></article><article class="pillar"><p class="tag">giong::fs</p><h3>Files on the same ring</h3><p>Open, read, write, fsync, statx, rename and remove are entries in the worker's ring, next to the network. No pool of blocking threads. A file has no cursor: every read and write names its offset.</p></article><article class="pillar"><p class="tag">!Send · Rc · RefCell</p><h3>Shared nothing</h3><p>One thread per core, and a task never changes thread. Futures need not be <code>Send</code>; <code>Rc</code> and <code>RefCell</code> just work. No locks on the hot path.</p></article></div>
+  </div>
+</section>
+
+<section class="sec" id="numbers">
+  <div class="wrap">
+    <header class="sec-head"><p class="eyebrow">numbers</p><h2>Measured, with the script next to every number</h2><p class="sec-lede">One core per server, loopback, medians of five interleaved rounds on a 4-vCPU virtual machine. giong is not faster than everything at everything. The charts say where the design pays off and where it does not.</p></header>
+    <div class="charts"><figure class="chart"><figcaption class="chart-head"><h3>System calls per request</h3><p class="chart-sub"><code>/json</code>, 50 connections · lower is better</p></figcaption><ol class="bars"><li class="bar is-giong"><span class="bar-name">giong</span><span class="bar-track"><span class="bar-fill" style="--v:1.36"></span></span><span class="bar-val">0.03</span></li><li class="bar is-alt"><span class="bar-name">giong-http</span><span class="bar-track"><span class="bar-fill" style="--v:1.36"></span></span><span class="bar-val">0.03</span></li><li class="bar"><span class="bar-name">Monoio (tuned)</span><span class="bar-track"><span class="bar-fill" style="--v:1.82"></span></span><span class="bar-val">0.04</span></li><li class="bar"><span class="bar-name">Hand-written epoll</span><span class="bar-track"><span class="bar-fill" style="--v:92.27"></span></span><span class="bar-val">2.03</span></li><li class="bar"><span class="bar-name">Raw Tokio</span><span class="bar-track"><span class="bar-fill" style="--v:93.18"></span></span><span class="bar-val">2.05</span></li><li class="bar"><span class="bar-name">Glommio</span><span class="bar-track"><span class="bar-fill" style="--v:95.45"></span></span><span class="bar-val">2.10</span></li></ol><p class="chart-note">The structural difference, and the most robust result here. On the small response it buys little, because a request costs about 4 µs of kernel time whichever way it is delivered. On 8 KB responses, where a whole batch leaves in one call, it is worth almost half the CPU: 16.0 µs per request against 27.9 for raw Tokio.</p><p class="chart-src"><a href="https://github.com/giong-run/Giong/blob/main/bench/syscalls.sh">bench/syscalls.sh</a></p></figure><figure class="chart"><figcaption class="chart-head"><h3>One connection: median latency</h3><p class="chart-sub"><code>/json</code>, microseconds · lower is better</p></figcaption><ol class="bars"><li class="bar is-alt"><span class="bar-name">giong + spin</span><span class="bar-track"><span class="bar-fill" style="--v:52.78"></span></span><span class="bar-val">19 µs</span></li><li class="bar is-giong"><span class="bar-name">giong</span><span class="bar-track"><span class="bar-fill" style="--v:77.78"></span></span><span class="bar-val">28 µs</span></li><li class="bar"><span class="bar-name">Monoio (tuned)</span><span class="bar-track"><span class="bar-fill" style="--v:77.78"></span></span><span class="bar-val">28 µs</span></li><li class="bar"><span class="bar-name">Raw Tokio</span><span class="bar-track"><span class="bar-fill" style="--v:80.56"></span></span><span class="bar-val">29 µs</span></li><li class="bar"><span class="bar-name">Hand-written epoll</span><span class="bar-track"><span class="bar-fill" style="--v:80.56"></span></span><span class="bar-val">29 µs</span></li><li class="bar is-alt"><span class="bar-name">giong-http</span><span class="bar-track"><span class="bar-fill" style="--v:83.33"></span></span><span class="bar-val">30 µs</span></li><li class="bar"><span class="bar-name">Glommio</span><span class="bar-track"><span class="bar-fill" style="--v:91.67"></span></span><span class="bar-val">33 µs</span></li></ol><p class="chart-note">With one connection every request finds a sleeping server. <code>spin_before_park(200 µs)</code> keeps the worker watching its ring: 47.9k requests/s instead of 32.4k. It costs CPU, 20.5 instead of 13.6 µs per request, and the worker keeps its core busy between requests. Without it giong is the same as the others.</p><p class="chart-src"><a href="https://github.com/giong-run/Giong/blob/main/bench/scale.sh">bench/scale.sh</a></p></figure><figure class="chart"><figcaption class="chart-head"><h3>5,000 connections: CPU per request</h3><p class="chart-sub"><code>/json</code>, microseconds of user plus kernel time · lower is better</p></figcaption><ol class="bars"><li class="bar is-giong"><span class="bar-name">giong</span><span class="bar-track"><span class="bar-fill" style="--v:49.11"></span></span><span class="bar-val">4.42 µs</span></li><li class="bar"><span class="bar-name">Hand-written epoll</span><span class="bar-track"><span class="bar-fill" style="--v:55.44"></span></span><span class="bar-val">4.99 µs</span></li><li class="bar is-alt"><span class="bar-name">giong + spin</span><span class="bar-track"><span class="bar-fill" style="--v:56.89"></span></span><span class="bar-val">5.12 µs</span></li><li class="bar"><span class="bar-name">Monoio (tuned)</span><span class="bar-track"><span class="bar-fill" style="--v:58.33"></span></span><span class="bar-val">5.25 µs</span></li><li class="bar is-alt"><span class="bar-name">giong-http</span><span class="bar-track"><span class="bar-fill" style="--v:59.67"></span></span><span class="bar-val">5.37 µs</span></li><li class="bar"><span class="bar-name">Raw Tokio</span><span class="bar-track"><span class="bar-fill" style="--v:63.78"></span></span><span class="bar-val">5.74 µs</span></li><li class="bar"><span class="bar-name">Glommio</span><span class="bar-track"><span class="bar-fill" style="--v:92.11"></span></span><span class="bar-val">8.29 µs</span></li></ol><p class="chart-note">giong is 11% below hand-written epoll and 16% below tuned Monoio, with the lowest p99 (26 ms; epoll 32, Monoio 44, raw Tokio 54). The likely reason is the provided buffer ring: receive buffers are reused while still warm in cache. At 50 and 1,000 connections giong, tuned Monoio and epoll are level.</p><p class="chart-src"><a href="https://github.com/giong-run/Giong/blob/main/bench/scale.sh">bench/scale.sh</a></p></figure><figure class="chart"><figcaption class="chart-head"><h3>HTTPS on one core</h3><p class="chart-sub">requests per second, TLS 1.3, the same rustls on both sides, thin line from lowest to highest round · higher is better</p></figcaption><ol class="bars"><li class="bar-group"><code>/json</code>, kept-alive</li><li class="bar is-giong"><span class="bar-name">giong-http + giong-tls</span><span class="bar-track"><span class="bar-fill" style="--v:90.50"></span><span class="bar-range" style="--lo:88.94;--hi:95.56"></span></span><span class="bar-val">144.8k</span></li><li class="bar"><span class="bar-name">Axum + rustls</span><span class="bar-track"><span class="bar-fill" style="--v:50.62"></span><span class="bar-range" style="--lo:50.12;--hi:51.75"></span></span><span class="bar-val">81.0k</span></li><li class="bar-group"><code>/users</code>, 8 KB, kept-alive</li><li class="bar is-giong"><span class="bar-name">giong-http + giong-tls</span><span class="bar-track"><span class="bar-fill" style="--v:29.88"></span><span class="bar-range" style="--lo:27.12;--hi:30.50"></span></span><span class="bar-val">47.8k</span></li><li class="bar"><span class="bar-name">Axum + rustls</span><span class="bar-track"><span class="bar-fill" style="--v:12.00"></span><span class="bar-range" style="--lo:11.69;--hi:12.38"></span></span><span class="bar-val">19.2k</span></li><li class="bar-group">a new handshake per request</li><li class="bar is-giong"><span class="bar-name">giong-http + giong-tls</span><span class="bar-track"><span class="bar-fill" style="--v:4.44"></span><span class="bar-range" style="--lo:4.19;--hi:4.69"></span></span><span class="bar-val">7.1k</span></li><li class="bar"><span class="bar-name">Axum + rustls</span><span class="bar-track"><span class="bar-fill" style="--v:4.56"></span><span class="bar-range" style="--lo:4.31;--hi:4.75"></span></span><span class="bar-val">7.3k</span></li></ol><p class="chart-note">TLS costs giong 4% on <code>/json</code> and 14% on 8 KB responses. Handshakes are level: a handshake is almost all cryptography, and both sides use the same library for it. Most of the <code>/users</code> factor is there without TLS.</p><p class="chart-src"><a href="https://github.com/giong-run/Giong/blob/main/bench/tls.sh">bench/tls.sh</a></p></figure><figure class="chart"><figcaption class="chart-head"><h3>File reads on one core</h3><p class="chart-sub">4 KiB at a random offset, one task, operations per second, thin line from lowest to highest round · higher is better</p></figcaption><ol class="bars"><li class="bar"><span class="bar-name">std (blocking)</span><span class="bar-track"><span class="bar-fill" style="--v:93.00"></span><span class="bar-range" style="--lo:89.47;--hi:97.60"></span></span><span class="bar-val">1.40M</span></li><li class="bar is-giong"><span class="bar-name">giong</span><span class="bar-track"><span class="bar-fill" style="--v:67.60"></span><span class="bar-range" style="--lo:57.87;--hi:76.87"></span></span><span class="bar-val">1.01M</span></li><li class="bar"><span class="bar-name">Tokio, one core</span><span class="bar-track"><span class="bar-fill" style="--v:12.27"></span><span class="bar-range" style="--lo:11.40;--hi:12.53"></span></span><span class="bar-val">184k</span></li><li class="bar"><span class="bar-name">Tokio, 4 cores</span><span class="bar-track"><span class="bar-fill" style="--v:2.20"></span><span class="bar-range" style="--lo:2.13;--hi:2.27"></span></span><span class="bar-val">33k</span></li></ol><p class="chart-note">5.5 times Tokio, where every read is a hand-off to another thread and back; on giong it is one entry in a batch. A blocking <code>std</code> call is 28% faster for cached data. What giong buys is a worker that never waits when the data is not cached, which this benchmark does not measure.</p><p class="chart-src"><a href="https://github.com/giong-run/Giong/blob/main/bench/fs.sh">bench/fs.sh</a></p></figure><figure class="chart"><figcaption class="chart-head"><h3>Small responses at 50 connections: a tie</h3><p class="chart-sub"><code>/json</code>, requests per second, thin line from lowest to highest round</p></figcaption><ol class="bars"><li class="bar is-alt"><span class="bar-name">giong-http</span><span class="bar-track"><span class="bar-fill" style="--v:88.95"></span><span class="bar-range" style="--lo:87.86;--hi:96.64"></span></span><span class="bar-val">195.7k</span></li><li class="bar"><span class="bar-name">Monoio (tuned)</span><span class="bar-track"><span class="bar-fill" style="--v:80.00"></span><span class="bar-range" style="--lo:76.00;--hi:82.50"></span></span><span class="bar-val">176.0k</span></li><li class="bar"><span class="bar-name">Raw Tokio</span><span class="bar-track"><span class="bar-fill" style="--v:79.14"></span><span class="bar-range" style="--lo:76.59;--hi:81.23"></span></span><span class="bar-val">174.1k</span></li><li class="bar is-giong"><span class="bar-name">giong</span><span class="bar-track"><span class="bar-fill" style="--v:78.86"></span><span class="bar-range" style="--lo:75.00;--hi:82.00"></span></span><span class="bar-val">173.5k</span></li><li class="bar"><span class="bar-name">Hand-written epoll</span><span class="bar-track"><span class="bar-fill" style="--v:77.68"></span><span class="bar-range" style="--lo:72.27;--hi:79.36"></span></span><span class="bar-val">170.9k</span></li><li class="bar"><span class="bar-name">Axum</span><span class="bar-track"><span class="bar-fill" style="--v:73.18"></span><span class="bar-range" style="--lo:69.64;--hi:76.32"></span></span><span class="bar-val">161.0k</span></li><li class="bar"><span class="bar-name">Bun</span><span class="bar-track"><span class="bar-fill" style="--v:67.14"></span><span class="bar-range" style="--lo:62.14;--hi:69.59"></span></span><span class="bar-val">147.7k</span></li><li class="bar"><span class="bar-name">Glommio</span><span class="bar-track"><span class="bar-fill" style="--v:65.41"></span><span class="bar-range" style="--lo:60.64;--hi:67.73"></span></span><span class="bar-val">143.9k</span></li><li class="bar"><span class="bar-name">Node.js</span><span class="bar-track"><span class="bar-fill" style="--v:17.95"></span><span class="bar-range" style="--lo:17.09;--hi:18.55"></span></span><span class="bar-val">39.5k</span></li></ol><p class="chart-note">giong, tuned Monoio, raw Tokio and epoll are within noise: the kernel's TCP stack, not the runtime, is most of the cost, and <code>wrk</code> is the limit. <code>giong-http</code> reads higher and we do not know why. It costs 7% more CPU per request, as checking every header should, and keeps its core busier. Treat that row as a measurement of the setup.</p><p class="chart-src"><a href="https://github.com/giong-run/Giong/blob/main/bench/run.sh">bench/run.sh</a></p></figure></div>
+    <div class="caveats">
+      <h3>What these numbers do not show</h3>
+      <div>
+        <ul><li><strong>One machine.</strong> Everything is loopback inside a 4-vCPU virtual machine, where the load generator competes for the same few cores.</li><li><strong>Not measured:</strong> more than two cores, a physical network, and disks. The file benchmark reads cached data only.</li><li><strong>8 KB responses:</strong> giong and Monoio serve 63–64k requests/s, everything else 35–37k. Most of that gap comes from the virtual machine. On physical hardware expect a smaller one.</li><li><strong><code>/compute</code> is the same for everyone</strong>, as it should be: the time goes into the function, not the runtime.</li><li><strong>Two cores are measured and are not a ranking.</strong> Two <code>wrk</code> threads are as likely to be the limit as the server.</li><li><strong>Monoio is compared tuned</strong>, with <code>DEFER_TASKRUN</code> passed in. Its default ring is about 20% slower on the small response; comparing against that would flatter giong.</li></ul>
+        <p class="chart-src" style="margin-top:1.5rem">Full tables, method and raw output: <a href="https://github.com/giong-run/Giong#benchmarks">README</a> · <a href="https://github.com/giong-run/Giong/tree/main/bench/results">bench/results/</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="code">
+  <div class="wrap">
+    <header class="sec-head"><p class="eyebrow">code</p><h2>What the code looks like</h2><p class="sec-lede">Every worker binds its own <code>SO_REUSEPORT</code> listener on the same port and the kernel spreads connections across cores. Buffers go to the kernel by value and come back with the result.</p></header>
+    <div class="code-grid">
+      <div class="tabs" role="tablist" aria-label="What the code looks like"><button class="tab" role="tab" id="tab-0" aria-controls="panel-0" aria-selected="true"><b>HTTP on every core</b><span>giong-http</span></button><button class="tab" role="tab" id="tab-1" aria-controls="panel-1" aria-selected="false"><b>HTTPS</b><span>giong-http + giong-tls</span></button><button class="tab" role="tab" id="tab-2" aria-controls="panel-2" aria-selected="false"><b>The bare runtime</b><span>giong</span></button><button class="tab" role="tab" id="tab-3" aria-controls="panel-3" aria-selected="false"><b>UDP and files</b><span>giong::net · giong::fs</span></button></div>
+      <div class="panels"><div class="panel" role="tabpanel" id="panel-0" aria-labelledby="tab-0"><p class="panel-title">HTTP on every core · giong-http</p><pre class="code" tabindex="0"><code><span class="k">use</span> std::time::<span class="t">Duration</span>;
+<span class="k">use</span> giong::net::<span class="t">TcpListener</span>;
+<span class="k">use</span> giong_http::{<span class="t">Request</span>, <span class="t">Response</span>, <span class="t">Server</span>};
+
+<span class="k">async</span> <span class="k">fn</span> handler(req: <span class="t">Request</span>) -&gt; <span class="t">Response</span> {
+    <span class="k">match</span> (req.method(), req.path()) {
+        (<span class="s">"GET"</span>, <span class="s">"/health"</span>) =&gt; <span class="t">Response</span>::text(<span class="s">"ok"</span>),
+        (<span class="s">"POST"</span>, <span class="s">"/echo"</span>) =&gt; <span class="t">Response</span>::new(200).body(req.body().to_vec()),
+        _ =&gt; <span class="t">Response</span>::new(404),
+    }
+}
+
+<span class="k">fn</span> main() -&gt; std::io::<span class="t">Result</span>&lt;()&gt; {
+    giong::<span class="t">Builder</span>::new()
+        .shutdown_on_signals(true)                  <span class="c">// Ctrl-C / SIGTERM stop it gracefully</span>
+        .shutdown_grace(<span class="t">Duration</span>::from_secs(10))    <span class="c">// requests in progress are answered</span>
+        .build()?
+        .run(|_worker| <span class="k">async</span> {
+            <span class="c">// Every worker binds its own SO_REUSEPORT listener on the same port;</span>
+            <span class="c">// the kernel spreads connections across cores.</span>
+            <span class="k">let</span> listener = <span class="t">TcpListener</span>::bind(<span class="s">"0.0.0.0:8080"</span>).expect(<span class="s">"bind"</span>);
+            <span class="t">Server</span>::new().serve(listener, handler).<span class="k">await</span>;
+        })
+}</code></pre><p class="panel-foot">One listener per worker; requests in progress are answered before a worker stops.</p></div><div class="panel" role="tabpanel" id="panel-1" aria-labelledby="tab-1"><p class="panel-title">HTTPS · giong-http + giong-tls</p><pre class="code" tabindex="0"><code><span class="k">let</span> acceptor = giong_tls::<span class="t">TlsAcceptor</span>::from_pem(
+    &amp;std::fs::read(<span class="s">"cert.pem"</span>)?,
+    &amp;std::fs::read(<span class="s">"key.pem"</span>)?,
+)?;
+
+<span class="c">// ... in each worker:</span>
+<span class="k">let</span> listener = <span class="t">TcpListener</span>::bind(<span class="s">"0.0.0.0:8443"</span>).expect(<span class="s">"bind"</span>);
+<span class="t">Server</span>::new().serve_tls(listener, acceptor.clone(), handler).<span class="k">await</span>;</code></pre><p class="panel-foot">Turn on the <code>tls</code> feature of <code>giong-http</code>. Handlers, limits, timeouts and graceful shutdown are the same as for plain HTTP.</p></div><div class="panel" role="tabpanel" id="panel-2" aria-labelledby="tab-2"><p class="panel-title">The bare runtime · giong</p><pre class="code" tabindex="0"><code><span class="k">use</span> giong::net::<span class="t">TcpListener</span>;
+
+<span class="k">fn</span> main() -&gt; std::io::<span class="t">Result</span>&lt;()&gt; {
+    giong::<span class="t">Builder</span>::new()
+        .shutdown_on_signals(true)
+        .build()?
+        .run(|_worker| <span class="k">async</span> {
+            <span class="k">let</span> listener = <span class="t">TcpListener</span>::bind(<span class="s">"0.0.0.0:8080"</span>).expect(<span class="s">"bind"</span>);
+            <span class="k">while</span> <span class="k">let</span> <span class="t">Some</span>(<span class="t">Ok</span>(stream)) = giong::until_shutdown(listener.accept()).<span class="k">await</span> {
+                giong::spawn(<span class="k">async</span> <span class="k">move</span> {
+                    <span class="k">loop</span> {
+                        <span class="k">let</span> <span class="t">Ok</span>(data) = stream.recv().<span class="k">await</span> <span class="k">else</span> { <span class="k">return</span> };
+                        <span class="k">if</span> data.is_empty() { <span class="k">return</span> }       <span class="c">// peer closed</span>
+                        <span class="k">let</span> reply = data.to_vec();
+                        <span class="k">drop</span>(data);                          <span class="c">// buffer back to the pool</span>
+                        <span class="k">if</span> stream.write_all(reply).<span class="k">await</span>.0.is_err() { <span class="k">return</span> }
+                    }
+                });
+            }
+        })
+}</code></pre><p class="panel-foot"><code>recv()</code> lends a buffer from the worker's pool. An empty buffer means the peer closed the connection.</p></div><div class="panel" role="tabpanel" id="panel-3" aria-labelledby="tab-3"><p class="panel-title">UDP and files · giong::net · giong::fs</p><pre class="code" tabindex="0"><code><span class="k">use</span> giong::{fs, fs::<span class="t">File</span>, net::<span class="t">UdpSocket</span>};
+
+<span class="k">async</span> <span class="k">fn</span> demo() -&gt; std::io::<span class="t">Result</span>&lt;()&gt; {
+    <span class="k">let</span> socket = <span class="t">UdpSocket</span>::bind(<span class="s">"127.0.0.1:9000"</span>)?;
+    <span class="k">let</span> (datagram, peer) = socket.recv_from().<span class="k">await</span>?;      <span class="c">// multishot, cancel safe</span>
+    <span class="k">let</span> reply = datagram.to_vec();
+    <span class="k">drop</span>(datagram);                                        <span class="c">// buffer back to the pool</span>
+    socket.send_to(reply, peer).<span class="k">await</span>.0?;
+
+    <span class="k">let</span> file = <span class="t">File</span>::create(<span class="s">"log.txt"</span>).<span class="k">await</span>?;
+    file.write_all_at(<span class="s">b"hello\n"</span>.to_vec(), 0).<span class="k">await</span>.0?;
+    file.sync_all().<span class="k">await</span>?;
+    <span class="k">let</span> text = fs::read(<span class="s">"log.txt"</span>).<span class="k">await</span>?;
+    assert_eq!(text, <span class="s">b"hello\n"</span>);
+    fs::rename(<span class="s">"log.txt"</span>, <span class="s">"log.old"</span>).<span class="k">await</span>
+}</code></pre><p class="panel-foot">Receiving borrows a buffer from the pool; whatever you hand to the kernel goes in by value and comes back with the result.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="design">
+  <div class="wrap">
+    <header class="sec-head"><p class="eyebrow">design</p><h2>Each worker owns everything it touches</h2><p class="sec-lede">A worker is a thread pinned to one core, with its own tasks, run queue, timer wheel, receive buffers and ring. Other threads reach it only through an injector and an eventfd.</p></header>
+    <div class="loop"><div class="loop-step"><b>run ready tasks</b><span>Tasks queue their reads, writes, accepts and closes. Nothing enters the kernel yet.</span></div><div class="loop-step is-enter"><b>io_uring_enter</b><span>Submit everything, collect everything that is ready. One system call.</span></div><div class="loop-step"><b>fire timers</b><span>A timing wheel in user space: arming and cancelling make no system call.</span></div><p class="loop-back">↺ repeat</p></div>
+    <div class="workers"><div class="worker"><b>worker 0</b><ul><li>tasks (!Send)</li><li>run queue</li><li>timer wheel</li><li>receive buffers</li><li>its own io_uring</li></ul></div><div class="worker"><b>worker 1</b><ul><li>tasks (!Send)</li><li>run queue</li><li>timer wheel</li><li>receive buffers</li><li>its own io_uring</li></ul></div><div class="worker is-n"><b>worker N</b>one per core</div><p class="bus">eventfd + injector, only when another thread wakes a task</p></div>
+    <dl class="decisions"><div><dt>Wakers</dt><dd>A waker does not own its task; it holds a slot number and a handle to the worker. Wakers are <code>Send + Sync</code> although tasks are not, without <code>unsafe</code>.</dd></div><div><dt>Writes</dt><dd>Ownership passing: <code>write_all(buf)</code> returns <code>(result, buf)</code>. The kernel keeps a pointer to the buffer until it is done, and this API makes that sound in Rust.</dd></div><div><dt>Backpressure</dt><dd>A slow reader has its multishot receive paused, so TCP slows the sender. A dry pool reclaims buffers that hold unread data. One stalled connection cannot starve the rest.</dd></div><div><dt>Timers</dt><dd>A hierarchical timing wheel, six levels of 64 slots, 1 ms ticks. Nearly every timer is an I/O timeout that is cancelled before it fires, so both are O(1).</dd></div><div><dt>Panics</dt><dd>A panic in a task is caught and reported through its <code>JoinHandle</code>. One bad connection does not take down the worker.</dd></div><div><dt>Shutdown</dt><dd>With a grace period, requests in progress are answered. Then: cancel everything, wait for the kernel to confirm, free. If confirmation does not come, leak on purpose.</dd></div><div><dt>UDP</dt><dd>Multishot <code>recvmsg</code> on the same buffer pool as TCP. Every worker binds its own <code>SO_REUSEPORT</code> socket and <code>recv_from</code> is cancel safe.</dd></div><div><dt>Old kernels</dt><dd>Three ring setups, tried in order: <code>DEFER_TASKRUN</code> (6.1+), <code>COOP_TASKRUN</code> (6.0), no flags. The fallbacks are tested on every change by forcing them.</dd></div></dl>
+  </div>
+</section>
+
+<section class="sec" id="crates">
+  <div class="wrap">
+    <header class="sec-head"><p class="eyebrow">crates</p><h2>Three crates, one version number</h2><p class="sec-lede">The runtime, and the two layers a service needs on top of it. Together they serve HTTPS at 144.8k requests/s on one core, against 81.0k for Axum on the same rustls.</p></header>
+    <div class="crates"><article class="crate"><h3>giong</h3><p>The runtime: TCP, UDP, Unix sockets, files, timers, a cross-thread channel and graceful shutdown.</p><ul><li><code>Builder::new().workers(n)</code>, one worker per core</li><li><code>TcpListener</code>, <code>TcpStream</code>, <code>UdpSocket</code>, <code>UnixListener</code>, <code>UnixStream</code></li><li><code>fs::File</code> with <code>read_at</code> and <code>write_at</code>, <code>fs::read</code>, <code>rename</code>, <code>remove_file</code></li><li><code>time::sleep</code>, <code>timeout</code>, <code>spawn</code>, <code>Handle::spawn_on</code>, <code>sync::mpsc</code></li></ul><p class="fact">about <b>5,400</b> lines · <b>115</b> tests</p></article><article class="crate"><h3>giong-http</h3><p>A small, strict HTTP/1.1 server with one async handler.</p><ul><li>Keep-alive, pipelining, bodies by <code>Content-Length</code> or chunked</li><li>Limits on head and body size; timeouts for idle, slow and slow-reading clients</li><li>Answers <code>400</code> to any request a proxy in front could read differently</li><li><code>Server::serve</code>, <code>serve_unix</code>, <code>serve_tls</code></li></ul><p class="fact">about <b>1,850</b> lines · <b>46</b> tests, among them 500,000 random inputs for the parser</p></article><article class="crate"><h3>giong-tls</h3><p>Server-side TLS 1.2 and 1.3 on rustls with <code>ring</code>. No OpenSSL.</p><ul><li><code>TlsAcceptor::from_pem(cert, key)</code>, or bring your own <code>rustls::ServerConfig</code></li><li><code>recv()</code> is cancel safe</li><li>A cancelled write poisons the sending side instead of corrupting the record stream</li><li>ALPN and a handshake timeout</li></ul><p class="fact">about <b>390</b> lines · <b>8</b> tests · TLS costs 4% on <code>/json</code></p></article></div>
+  </div>
+</section>
+
+<section class="sec" id="verified">
+  <div class="wrap">
+    <header class="sec-head"><p class="eyebrow">verified</p><h2>What has been checked, and what has not</h2><p class="sec-lede">A runtime that hands buffers to the kernel has to earn trust. This is the evidence so far, and the gaps in it.</p></header>
+    <div class="proof">
+      <div class="proof-col"><h3>Checked</h3><ul><li><strong>169 tests</strong> across the three crates, repeated in release mode on all three io_uring setups without a failure.</li><li><strong>ThreadSanitizer</strong> over 157 tests: no data race.</li><li><strong>valgrind memcheck</strong> over the single-threaded tests: no invalid access, no leak.</li><li><strong>Load:</strong> over 250,000 connections opened and closed, 5,000 at once, the client killed abruptly six times. File descriptors return to the idle count and memory does not grow between runs.</li><li><strong>Graceful shutdown under load:</strong> SIGTERM during 40 slow requests. With a grace period, 400 of 400 were answered; without one, 156 of 200.</li><li><strong>CI</strong> runs formatting, clippy, the documentation build, a build with Rust 1.80, the repeated tests, the fallback setups and ThreadSanitizer.</li></ul></div>
+      <div class="proof-col"><h3>Not checked, and you should know it</h3><ul><li>giong has <strong>not run in production</strong>.</li><li><strong>No real 6.0 kernel.</strong> The fallback setups were forced on 6.18. That checks giong's code paths, not the behaviour of the old kernel itself.</li><li>Neither sanitizer nor valgrind can see the kernel writing into memory, so cancellation safety rests on the design and on <code>tests/cancel.rs</code>.</li><li>The cross-thread wake-up has not been model-checked with loom.</li><li><code>giong-tls</code> has had <strong>no independent security audit</strong>. The cryptography and the protocol are rustls's; giong's part is connecting rustls to the socket.</li></ul></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="limits">
+  <div class="wrap">
+    <header class="sec-head"><p class="eyebrow">limits</p><h2>When giong is the wrong choice</h2><p class="sec-lede">0.2 is complete enough to write real servers. It is also young, narrow on purpose, and Linux only.</p></header>
+    <div class="limits"><article class="limit"><h3>Linux only</h3><p>Kernel 6.0 or newer. There is no epoll, kqueue or IOCP fallback, and there will not be one.</p></article><article class="limit"><h3>Not Tokio's ecosystem</h3><p>Crates that need the Tokio runtime (hyper, sqlx, reqwest) do not run on giong. Crates that only use <code>std::future</code> do.</p></article><article class="limit"><h3>No HTTP/2</h3><p><code>giong-http</code> speaks HTTP/1.1 and receives a body in full before it calls the handler. A body over the limit is refused, not streamed.</p></article><article class="limit"><h3>TLS is server side only</h3><p>No TLS client, no kTLS, no certificate reload built in.</p></article><article class="limit"><h3>Tasks do not migrate</h3><p>An overloaded core is not helped by an idle one. Spread work yourself with <code>spawn_on</code> or a channel.</p></article><article class="limit"><h3>No asynchronous DNS</h3><p><code>bind</code> and <code>connect</code> resolve names with a blocking call. Also missing: Unix datagram sockets, multicast, reading directories.</p></article></div>
+    <div class="else"><h3>Pick something else when</h3><div><p><strong>Monoio</strong> is the mature choice and runs in production at ByteDance. If you need an HTTP client, HTTP/2 or Tokio-compatible crates today, use it.</p><p><strong>Glommio</strong> is built for storage engines: Direct I/O and priority scheduling are its strengths.</p><p><strong>Tokio</strong> is the general-purpose runtime. giong is not trying to replace it for every workload.</p></div></div>
+  </div>
+</section>
+
+<section class="sec" id="start">
+  <div class="wrap">
+    <header class="sec-head"><p class="eyebrow">start</p><h2>Run it</h2><p class="sec-lede">Clone the repository and run the suite. Version 0.2 is not on crates.io yet, so build it from source.</p></header>
+    <div class="start">
+      <dl class="reqs"><div><dt>kernel</dt><dd><strong>Linux 6.0 or newer</strong>, 6.1+ recommended. Developed and tested on 6.18.</dd></div><div><dt>rust</dt><dd>1.80 or newer.</dd></div><div><dt>windows</dt><dd>giong does not build on Windows or macOS. Use WSL2 with a 6.x kernel, a Linux virtual machine, or Docker started with <code>--security-opt seccomp=unconfined</code>.</dd></div><div><dt>license</dt><dd>MIT OR Apache-2.0, at your option.</dd></div></dl>
+      <div>
+        <pre class="code" tabindex="0"><code>git clone https://github.com/giong-run/Giong.git &amp;&amp; cd Giong
+cargo test --workspace --all-features <span class="c">  # all three crates</span>
+cargo run --release --example echo    <span class="c">  # TCP echo, port 7000</span>
+cargo run --release --example http    <span class="c">  # HTTP/1.1, port 3006</span>
+curl localhost:3006/json</code></pre>
+        <div class="start-cta">
+          <a class="btn btn-main" href="https://github.com/giong-run/Giong"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>GitHub</a>
+          <a class="btn" href="https://github.com/giong-run/Giong/blob/main/ROADMAP.md">Roadmap</a>
+          <a class="btn" href="https://github.com/giong-run/Giong/blob/main/CHANGELOG.md">Changelog</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <a class="brand" href="#" aria-label="giong"><picture><source media="(prefers-color-scheme: light)" srcset="assets/giong-mark-light.svg"><img src="assets/giong-mark.svg" alt="" width="24" height="24"></picture><span>giong</span></a>
+    <nav class="foot-links" aria-label="Project">
+      <a href="https://github.com/giong-run/Giong">GitHub</a>
+      <a href="https://github.com/giong-run/Giong/blob/main/ROADMAP.md">Roadmap</a>
+      <a href="https://github.com/giong-run/Giong/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/giong-run/Giong/blob/main/CONTRIBUTING.md">Contributing</a>
+      <a href="https://github.com/giong-run/Giong/issues">Issues</a>
+    </nav>
+    <span>Dual-licensed under MIT or Apache-2.0.</span>
+    <span class="ramp" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+  </div>
+</footer>
+
+<script src="main.js" defer></script>
+</body>
+</html>
