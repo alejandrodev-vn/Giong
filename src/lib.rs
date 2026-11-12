@@ -19,7 +19,9 @@
 //! * **Multishot accept and receive** with kernel-provided buffers: one
 //!   submission per listener / connection, no buffer pinned by idle
 //!   connections.
-//! * **TCP, UDP and files**, all through the ring. See [`net`] and [`fs`].
+//! * **One ring for everything.** TCP, UDP and Unix sockets ([`net`]) and
+//!   files ([`fs`]) all go through the worker's io_uring. File I/O needs no
+//!   pool of blocking threads.
 //! * **A latency dial.** [`Builder::spin_before_park`] lets a worker watch its
 //!   ring instead of sleeping, for services where microseconds matter more
 //!   than an idle core.

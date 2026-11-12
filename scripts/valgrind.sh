@@ -3,7 +3,7 @@
 # process, and fails if any test fails or valgrind reports an error or a
 # definite leak.
 #
-#   scripts/valgrind.sh [suite ...]        default: executor time net cancel fs udp
+#   scripts/valgrind.sh [suite ...]        default: executor time net cancel fs udp unix
 #
 # Not covered, because valgrind (3.22) treats io_uring_enter as non-blocking
 # and so stalls programs with more than one thread waiting in it:
@@ -18,7 +18,7 @@ cd "$(dirname "$0")/.."
 command -v valgrind >/dev/null || { echo "valgrind is not installed" >&2; exit 2; }
 
 SUITES=("$@")
-[ ${#SUITES[@]} -eq 0 ] && SUITES=(executor time net cancel fs udp)
+[ ${#SUITES[@]} -eq 0 ] && SUITES=(executor time net cancel fs udp unix)
 SKIP="interoperates_with_blocking_std_clients"
 TIMEOUT=${TIMEOUT:-300}
 
