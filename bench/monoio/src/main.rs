@@ -112,27 +112,51 @@ async fn serve(mut stream: TcpStream) {
     }
 }
 
-fn main() {
-    let mut urb = io_uring::IoUring::builder();
-    match std::env::var("MONOIO_RING").as_deref() {
-        Ok("coop") => {
-            urb.setup_coop_taskrun().setup_taskrun_flag();
-        }
-        Ok("defer") => {
-            urb.setup_single_issuer().setup_defer_taskrun();
-        }
-        _ => {}
+/// CPUs this process may run on (the benchmark scripts set them with taskset).
+fn allowed_cpus() -> Vec<usize> {
+    // SAFETY: plain libc call filling a zeroed cpu_set_t.
+    unsafe {
+        let mut set: libc::cpu_set_t = std::mem::zeroed();
+        libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut set);
+        (0..libc::CPU_SETSIZE as usize).filter(|&i| libc::CPU_ISSET(i, &set)).collect()
     }
-    let mut rt = monoio::RuntimeBuilder::<monoio::IoUringDriver>::new()
-        .uring_builder(urb)
-        .build()
-        .expect("monoio io_uring runtime");
-    rt.block_on(async {
-        let listener = TcpListener::bind("127.0.0.1:3007").expect("bind");
-        loop {
-            if let Ok((stream, _)) = listener.accept().await {
-                monoio::spawn(serve(stream));
-            }
-        }
-    });
+}
+
+fn main() {
+    // One runtime per CPU the process is allowed to run on, each with its own
+    // listener. MONOIO_RING=coop|defer chooses the io_uring setup flags; the
+    // default is Monoio's own.
+    let workers: Vec<_> = allowed_cpus()
+        .into_iter()
+        .map(|cpu| {
+            std::thread::spawn(move || {
+                monoio::utils::bind_to_cpu_set([cpu]).expect("pin");
+                let mut urb = io_uring::IoUring::builder();
+                match std::env::var("MONOIO_RING").as_deref() {
+                    Ok("coop") => {
+                        urb.setup_coop_taskrun().setup_taskrun_flag();
+                    }
+                    Ok("defer") => {
+                        urb.setup_single_issuer().setup_defer_taskrun();
+                    }
+                    _ => {}
+                }
+                let mut rt = monoio::RuntimeBuilder::<monoio::IoUringDriver>::new()
+                    .uring_builder(urb)
+                    .build()
+                    .expect("monoio io_uring runtime");
+                rt.block_on(async {
+                    let listener = TcpListener::bind("127.0.0.1:3007").expect("bind");
+                    loop {
+                        if let Ok((stream, _)) = listener.accept().await {
+                            monoio::spawn(serve(stream));
+                        }
+                    }
+                });
+            })
+        })
+        .collect();
+    for worker in workers {
+        worker.join().expect("monoio worker panicked");
+    }
 }

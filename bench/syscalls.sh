@@ -20,12 +20,13 @@ declare -A CMD=(
   [glommio]="glommio/target/release/bench-glommio"
   [monoio-tuned]="env MONOIO_RING=defer monoio/target/release/bench-monoio"
   [giong]="giong/target/release/bench-giong"
+  [giong-http]="giong-http/target/release/bench-giong-http"
 )
-declare -A PORT=([native-epoll]=3004 [tokio-raw]=3005 [giong]=3006 [monoio]=3007 [monoio-tuned]=3007 [glommio]=3008)
+declare -A PORT=([native-epoll]=3004 [tokio-raw]=3005 [giong]=3006 [monoio]=3007 [monoio-tuned]=3007 [glommio]=3008 [giong-http]=3009)
 
 cpu_ticks() { cat /proc/"$1"/task/*/stat | awk '{u+=$14; s+=$15} END{print u, s}'; }
 
-for s in ${SERVERS:-tokio-raw native-epoll monoio glommio giong}; do
+for s in ${SERVERS:-tokio-raw native-epoll monoio monoio-tuned glommio giong giong-http}; do
   taskset -c "$SERVER_CPU" ${CMD[$s]} >/dev/null 2>&1 &
   pid=$!
   sleep 1

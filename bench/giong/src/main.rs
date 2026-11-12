@@ -113,6 +113,8 @@ async fn serve(stream: TcpStream) {
 }
 
 fn main() {
+    // One worker per CPU the process is allowed to run on (the default), each
+    // with its own listener; the benchmark scripts choose the CPUs with taskset.
     // GIONG_SPIN_US=<microseconds> turns on busy-polling before sleeping.
     let mut builder = giong::Builder::new();
     if let Some(us) = std::env::var("GIONG_SPIN_US").ok().and_then(|v| v.parse().ok()) {
@@ -125,13 +127,15 @@ fn main() {
     }) {
         builder = builder.recv_buffers(count, size);
     }
-    let run = builder.block_on(async {
-        let listener = TcpListener::bind("127.0.0.1:3006").expect("bind");
-        loop {
-            if let Ok(stream) = listener.accept().await {
-                giong::spawn(serve(stream));
+    let runtime = builder.build().expect("giong runtime");
+    runtime
+        .run(|_worker| async {
+            let listener = TcpListener::bind("127.0.0.1:3006").expect("bind");
+            loop {
+                if let Ok(stream) = listener.accept().await {
+                    giong::spawn(serve(stream));
+                }
             }
-        }
-    });
-    run.expect("giong runtime");
+        })
+        .expect("giong runtime");
 }
