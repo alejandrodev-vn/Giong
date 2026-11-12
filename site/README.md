@@ -6,7 +6,7 @@ folder.
 
 ```
 site/
-  build.py        generates public/index.html
+  build.py        generates public/index.html, 404.html, sitemap.xml and robots.txt
   public/         the folder to deploy
     styles.css    every style, light and dark from prefers-color-scheme
     main.js       copy button, code tabs, the event-loop animation (optional)
@@ -17,7 +17,8 @@ site/
 
 ## Changing the text or a number
 
-Edit `build.py` (the `CHARTS`, `CODE` and `T` tables), then run
+Edit `build.py` (the `CHARTS`, `CODE`, `COMPARE`, `ROADMAP`, `EXAMPLES`, `FAQ` and `T`
+tables), then run
 
 ```bash
 python3 site/build.py
@@ -25,9 +26,16 @@ python3 site/build.py
 
 Python 3.8+ with nothing installed. Commit the regenerated HTML with the change.
 
-Every number on the page comes from the README of release 0.2 and `bench/results/`. When a
+Every number on the page comes from the README of release 0.2 and `bench/results/`; the
+comparison table comes from the README too, and the roadmap from `ROADMAP.md`. When a
 benchmark is run again, update the README first and then the page, so the two never
 disagree. Keep the caveats next to the numbers they qualify.
+
+## When the crates reach crates.io
+
+Set `ON_CRATES_IO = True` at the top of `build.py` and rebuild. The install commands switch
+from the `v0.2.0` git tag to `cargo add giong`, and docs.rs and crates.io links appear on the
+crate cards, in the docs section and in the footer. For a new release, change `VERSION`.
 
 ## Looking at it locally
 
@@ -48,5 +56,5 @@ four `A` and four `AAAA` records for the apex pointing at GitHub Pages, `www` as
 to `giong-run.github.io`, and the `_github-pages-challenge-giong-run` TXT record that
 verifies the domain for the organisation. HTTPS is enforced.
 
-The links to `bench/*.sh`, `ROADMAP.md` and `CHANGELOG.md` point at the `main` branch on
-GitHub, so they resolve once release 0.2 is merged there.
+The links to `bench/*.sh`, `ROADMAP.md`, `CHANGELOG.md` and `examples/` point at the `main`
+branch on GitHub.

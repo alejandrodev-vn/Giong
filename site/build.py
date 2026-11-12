@@ -6,6 +6,7 @@ repository. Change a number in CHARTS or in the text tables T below, run
 `python3 site/build.py`, and the page in site/public/ follows.
 """
 import html
+import json
 import math
 import re
 import sys
@@ -13,7 +14,21 @@ from pathlib import Path
 
 REPO = "https://github.com/giong-run/Giong"
 BLOB = REPO + "/blob/main/"
+TREE = REPO + "/tree/main/"
 SITE = "https://giong.run/"
+VERSION = "0.2.0"
+TAG = "v" + VERSION
+RELEASE = f"{REPO}/releases/tag/{TAG}"
+SECURITY = REPO + "/security/advisories/new"   # GitHub private vulnerability reporting
+
+# The author credited on the page, in the footer and in the structured data.
+AUTHOR = "thekivashyn"
+AUTHOR_URL = "https://github.com/thekivashyn"
+
+# Flip to True once giong, giong-http and giong-tls are published on crates.io:
+# the install commands switch to `cargo add giong` and docs.rs links appear.
+ON_CRATES_IO = False
+CRATE_NAMES = ["giong", "giong-http", "giong-tls"]
 
 
 # ---------------------------------------------------------------- helpers
@@ -54,6 +69,9 @@ def code_only(s):
 def shell(src):
     lines = []
     for line in src.split("\n"):
+        if line.lstrip().startswith("#"):
+            lines.append(f'<span class="c">{html.escape(line, quote=False)}</span>')
+            continue
         code, sep, comment = line.partition("  #")
         line = html.escape(code, quote=False)
         if sep:
@@ -275,11 +293,127 @@ async fn demo() -> std::io::Result<()> {
 }'''),
 ]
 
-START_SH = '''git clone https://github.com/giong-run/Giong.git && cd Giong
-cargo test --workspace --all-features   # all three crates
-cargo run --release --example echo      # TCP echo, port 7000
-cargo run --release --example http      # HTTP/1.1, port 3006
-curl localhost:3006/json'''
+if ON_CRATES_IO:
+    ADD = "cargo add"
+    INSTALL_SH = '''cargo add giong
+cargo add giong-http'''
+else:
+    ADD = f"cargo add --git {REPO} --tag {TAG}"
+    INSTALL_SH = f'''{ADD} giong
+{ADD} giong-http'''
+HERO_CMD = f"{ADD} giong"
+
+RUN_SH = '''cargo run --release          # listens on port 8080
+curl localhost:8080/health   # ok'''
+
+FROM_SOURCE_SH = '''git clone https://github.com/giong-run/Giong.git && cd Giong
+cargo test --workspace --all-features   # the whole suite, all three crates'''
+
+# The programs in examples/, with the first line of their doc comment.
+EXAMPLES = [
+    ("echo", "A TCP echo server on every core.",
+     "cargo run --release --example echo", "nc 127.0.0.1 7000"),
+    ("http", "A small HTTP/1.1 server: keep-alive, pipelining, idle timeouts, a header size "
+             "limit and graceful shutdown on SIGINT and SIGTERM. The same routes the benchmarks use.",
+     "cargo run --release --example http", "curl localhost:3006/json"),
+    ("udp_echo", "A UDP echo server, receiving with multishot `recvmsg`.",
+     "cargo run --release --example udp_echo", "echo hello | nc -u -w1 127.0.0.1 7001"),
+    ("cat", "Prints files to standard output, reading them through io_uring with positional reads.",
+     "cargo run --release --example cat -- Cargo.toml", ""),
+]
+
+# From "Compared with Monoio and Glommio" in the README. Versions as measured there.
+COMPARE_HEAD = ["", "giong 0.2", "Monoio 0.2.4", "Glommio 0.9.0"]
+COMPARE = [
+    ("Platforms", "Linux ≥ 6.0", "Linux ≥ 5.6, with an epoll/kqueue fallback (runs on macOS)",
+     "Linux ≥ 5.8, needs a raised memlock limit"),
+    ("Receiving", "multishot, kernel-provided buffers", "one submission per read, caller's buffer",
+     "direct `recv`, io_uring to wait"),
+    ("Accepting", "multishot", "one submission per accept", "one submission per accept"),
+    ("Buffer API", "ownership passing", "ownership passing", "borrowed (`AsyncRead` / `AsyncWrite`)"),
+    ("Timeout around a read", "loses no data", "needs the separate `cancelable_*` API", "—"),
+    ("Ring defaults", "`DEFER_TASKRUN` on", "no flags; pass your own builder", "—"),
+    ("Busy-poll option", "yes", "no", "yes"),
+    ("Multi-core", "built-in builder with graceful draining and signals", "`#[monoio::main(threads = N)]`",
+     "executor pools placed by CPU topology"),
+    ("Scheduling", "FIFO", "FIFO", "weighted queues with latency classes"),
+    ("I/O", "TCP, UDP, Unix sockets, files", "TCP, UDP, Unix sockets, files",
+     "TCP, UDP, Unix sockets, Direct I/O files"),
+    ("Ecosystem", "its own HTTP/1.1 server and server-side TLS; nothing else",
+     "TLS, HTTP, codecs, Tokio compatibility layer", "channels, semaphores, rate control"),
+    ("Size", "~5,400 lines, plus ~2,250 for HTTP and TLS", "~25,000 lines", "~40,500 lines"),
+]
+
+# From ROADMAP.md. (version, name, state, items, exit criteria)
+ROADMAP = [
+    ("0.1", "Foundation", "done",
+     ["Executor, io_uring driver, TCP, UDP, files, timers",
+      "Thread-per-core runtime, busy-poll mode, cross-thread channel",
+      "Cancellation safety, backpressure, tests and benchmarks"], ""),
+    ("0.2", "A runtime you can serve from", "current",
+     ["Graceful connection draining on shutdown",
+      "Unix sockets, multishot UDP, more file operations",
+      "`giong-http` and `giong-tls`, HTTPS in `giong-http`",
+      "ThreadSanitizer and ring fallbacks in CI; 500,000 random parser inputs"], ""),
+    ("0.3", "Prove it", "next",
+     ["Multi-core benchmarks on a physical network, 1 to N workers",
+      "The suite on real 6.0 and 6.1 kernels",
+      "`loom` model check of the cross-thread wake-up; `cargo fuzz` of the parser",
+      "Soak test; an independent look at `giong-tls`"],
+     "published multi-core results with their method, and no open memory- or thread-safety finding"),
+    ("0.4", "Breadth", "planned",
+     ["Vectored writes; streaming bodies in `giong-http`",
+      "TLS client; asynchronous DNS",
+      "Reading directories, `fallocate`; bounded and oneshot channels"],
+     "every item with tests, including cancellation tests"),
+    ("0.5", "Speed", "planned",
+     ["Fixed files, zero-copy send, receive bundles",
+      "Optional `SQPOLL` and NAPI busy polling; kTLS",
+      "Per-worker statistics as a public API"],
+     "a documented, reproducible gain for every option that is merged"),
+    ("0.6", "Ecosystem", "planned",
+     ["HTTP/2 in `giong-http`",
+      "Adapters for the `futures-io` / Tokio I/O traits",
+      "Decide whether a hyper integration is worth maintaining"],
+     "an HTTPS server serving real browsers over HTTP/2"),
+    ("1.0", "Stable", "planned",
+     ["Every public item documented",
+      "Limitations reduced to deliberate non-goals",
+      "At least one production user reporting back"], ""),
+]
+NON_GOALS = ["Other operating systems: no epoll, kqueue or IOCP fallback.",
+             "Work stealing: tasks stay on the worker that created them.",
+             "A general-purpose runtime: giong is not trying to replace Tokio for every workload.",
+             "`Send` futures as a requirement: the API stays usable with `Rc` and `RefCell`."]
+
+FAQ = [
+    ("Is giong ready for production?",
+     "Not yet. 0.2 is complete enough to write real servers and is tested hard (see "
+     "<a href=\"#verified\">what has been checked</a>), but it has not run in production. 1.0 "
+     "waits for, among other things, at least one production user reporting back."),
+    ("Does it run on macOS or Windows?",
+     "No. io_uring is a Linux interface and there is no fallback. On Windows use WSL2 with a 6.x "
+     "kernel (<code>uname -r</code>; <code>wsl --update</code> if it is older); on macOS a Linux "
+     "virtual machine. In Docker, start the container with "
+     "<code>--security-opt seccomp=unconfined</code>: the default profile blocks io_uring."),
+    ("Which Linux kernel do I need?",
+     "6.0 or newer, 6.1 or newer recommended. giong tries three ring setups in order: "
+     "<code>DEFER_TASKRUN</code> (6.1+), <code>COOP_TASKRUN</code> (6.0), then no flags."),
+    ("Can I use hyper, reqwest, sqlx or other Tokio crates?",
+     "Not crates that need the Tokio runtime. Crates that only use <code>std::future</code> work. "
+     "Adapters for the <code>futures-io</code> and Tokio I/O traits are planned for 0.6."),
+    ("Is it faster than Tokio?",
+     "Sometimes, and the page says where. Small responses at 50 connections are a tie. giong "
+     "makes about 0.03 system calls per request against 2.05, spends the least CPU per request "
+     "at 5,000 connections, and reads files 5.5 times faster than Tokio on one core. Every number "
+     "comes from one 4-vCPU virtual machine over loopback."),
+    ("How do I report a security problem?",
+     f"Privately, through <a href=\"{SECURITY}\">GitHub's vulnerability reporting</a>, not in a "
+     "public issue."),
+    ("Why the name?",
+     "After Thánh Gióng, the child of Vietnamese legend who lay silent for three years and then "
+     "rose a giant: next to nothing while idle, every core the moment load arrives."),
+]
 
 # ---------------------------------------------------------------- text
 T = dict(
@@ -287,14 +421,15 @@ T = dict(
     desc=("giong is a thread-per-core async runtime for Rust on Linux, built directly on io_uring. "
           "One syscall per tick, not per operation. TCP, UDP, Unix sockets, files, HTTP/1.1 and TLS."),
     skip="Skip to content",
-    nav=[("why", "Why"), ("numbers", "Numbers"), ("code", "Code"), ("design", "Design"),
-         ("crates", "Crates"), ("limits", "Limits")],
-    status=["<b>v0.2</b>", "Linux 6.0+", "Rust 1.80+", "MIT OR Apache-2.0"],
+    nav=[("why", "Why"), ("numbers", "Numbers"), ("compare", "Compare"), ("code", "Code"),
+         ("crates", "Crates"), ("roadmap", "Roadmap"), ("start", "Get started")],
+    status=[f'<a href="{RELEASE}"><b>v{VERSION}</b></a>', '<a href="#start">Linux 6.0+</a>',
+            "Rust 1.80+", f'<a href="{BLOB}LICENSE-MIT">MIT</a>&nbsp;OR&nbsp;<a href="{BLOB}LICENSE-APACHE">Apache-2.0</a>'],
     h1="One syscall per tick, <em>not per operation.</em>",
     lede=("giong is a thread-per-core async runtime for Rust on Linux, built directly on io_uring. "
           "Every read, write, accept and close that one turn of the event loop produces enters "
           "the kernel in **a single `io_uring_enter`**."),
-    cta_start="Run it", cta_numbers="See the numbers", copy="copy", copied="copied",
+    cta_start="Get started", cta_numbers="See the numbers", copy="copy", copied="copied",
     tick_label="Illustration: the operations of one turn of the event loop enter the kernel in one system call.",
     tick_ops="operations queued", tick_unit1="syscall this tick", tick_unitn="syscalls this tick",
     vs_giong="giong", vs_epoll="epoll style",
@@ -462,9 +597,28 @@ T = dict(
         "strengths.",
         "**Tokio** is the general-purpose runtime. giong is not trying to replace it for every workload.",
     ],
-    start=("start", "Run it",
-           "Clone the repository and run the suite. Version 0.2 is not on crates.io yet, so build "
-           "it from source."),
+    start=("get started", "Add it to a project",
+           ("Two commands and a handler. " + ("The crates are on crates.io." if ON_CRATES_IO else
+            "Version 0.2 is not on crates.io yet, so Cargo fetches the `v0.2.0` tag from GitHub; "
+            "the code is the same."))),
+    step_add="1 · Add the crates",
+    step_add_p="`giong-http` is optional. For HTTPS, add it with `--features tls`.", step_run="2 · Write a handler and run it",
+    step_run_p="Paste the HTTP example from <a href=\"#code\">What the code looks like</a> into <code>src/main.rs</code>, then:",
+    step_src="Or work on giong itself",
+    examples_h="Examples in the repository", examples_p="Each one runs from a clone of the repository.",
+    compare=("compare", "Compared with Monoio and Glommio",
+             "The other io_uring runtimes for Rust, as they stood when the benchmarks ran. "
+             "Monoio and Glommio are mature projects with wider ecosystems; this table is about "
+             "how each one is built, not a ranking."),
+    roadmap_sec=("roadmap", "Where giong is going",
+                 "Milestones in order, with no dates: a milestone is done when its exit criteria are "
+                 "met. 0.3 is about measuring, not features."),
+    nongoals_h="Deliberate non-goals",
+    resources=("docs & community", "Read more, ask, contribute",
+               "giong is open source and developed in the open on GitHub. Open an issue before "
+               "starting on anything larger than a small fix."),
+    faq=("faq", "Questions people ask", "Short answers. The README has the long ones."),
+    made_by="Created and maintained by",
     reqs=[("kernel", "**Linux 6.0 or newer**, 6.1+ recommended. Developed and tested on 6.18."),
           ("rust", "1.80 or newer."),
           ("windows", "giong does not build on Windows or macOS. Use WSL2 with a 6.x kernel, a Linux "
@@ -472,6 +626,7 @@ T = dict(
           ("license", "MIT OR Apache-2.0, at your option.")],
     roadmap="Roadmap", changelog="Changelog", contributing="Contributing", issues="Issues",
     foot="Dual-licensed under MIT or Apache-2.0.",
+    foot_tag="A thread-per-core async runtime for Rust on Linux, built directly on io_uring.",
 )
 
 GH_ICON = ('<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 '
@@ -514,6 +669,65 @@ def head(t, sec):
             f'<p class="sec-lede">{md(lede)}</p></header>')
 
 
+def json_ld():
+    """Structured data for search engines: the software, and the FAQ."""
+    author = {"@type": "Person", "name": AUTHOR, "url": AUTHOR_URL}
+    software = {
+        "@type": "SoftwareSourceCode",
+        "name": "giong",
+        "description": T["desc"],
+        "url": SITE,
+        "codeRepository": REPO,
+        "programmingLanguage": "Rust",
+        "runtimePlatform": "Linux 6.0+",
+        "version": VERSION,
+        "license": ["https://opensource.org/licenses/MIT", "https://www.apache.org/licenses/LICENSE-2.0"],
+        "image": SITE + "assets/social-preview.png",
+        "author": author,
+        "maintainer": author,
+        "keywords": "io_uring, async runtime, thread-per-core, Rust, Linux",
+    }
+    faq = {
+        "@type": "FAQPage",
+        "mainEntity": [{"@type": "Question", "name": q,
+                        "acceptedAnswer": {"@type": "Answer", "text": re.sub(r"<[^>]+>", "", a)}}
+                       for q, a in FAQ],
+    }
+    data = {"@context": "https://schema.org", "@graph": [software, faq]}
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+
+
+def not_found():
+    return f'''<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Not found · giong</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="/assets/favicon.ico" sizes="any">
+<link rel="icon" href="/assets/giong-icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<main class="lost wrap">
+  <p class="eyebrow">404</p>
+  <h1>Nothing here, <em>not even one syscall.</em></h1>
+  <p class="lede">The page you asked for does not exist.</p>
+  <div class="cta"><a class="btn btn-main" href="/">Back to giong.run</a><a class="btn" href="{REPO}">GitHub</a></div>
+</main>
+</body>
+</html>
+'''
+
+
+def sitemap():
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            f'  <url><loc>{SITE}</loc></url>\n'
+            '</urlset>\n')
+
+
 def page():
     t = T
     mark = (f'<picture><source media="(prefers-color-scheme: light)" srcset="assets/giong-mark-light.svg">'
@@ -547,11 +761,49 @@ def page():
                f'<div class="worker is-n"><b>worker N</b>{t["worker_n"]}</div>'
                f'<p class="bus">{t["bus"]}</p>')
     decisions = "".join(f"<div><dt>{a}</dt><dd>{md(b)}</dd></div>" for a, b in t["decisions"])
+    def crate_links(name):
+        links = [("source", REPO if name == "giong" else TREE + name)]
+        if ON_CRATES_IO:
+            links += [("docs.rs", f"https://docs.rs/{name}"), ("crates.io", f"https://crates.io/crates/{name}")]
+        return " · ".join(f'<a href="{u}">{label}</a>' for label, u in links)
     crates = "".join(
         f'<article class="crate"><h3>{name}</h3><p>{md(p)}</p>'
         f'<ul>{"".join(f"<li>{md(x)}</li>" for x in items_)}</ul>'
-        f'<p class="fact">{code_only(fact)}</p></article>'
+        f'<p class="fact">{code_only(fact)}</p>'
+        f'<p class="crate-links">{crate_links(name)}</p></article>'
         for name, p, items_, fact in t["crate"])
+    cmp_head = "".join(f'<th scope="col"{" class=is-giong" if n == 1 else ""}>{h}</th>'
+                       for n, h in enumerate(COMPARE_HEAD))
+    cmp_rows = "".join(
+        f'<tr><th scope="row">{row[0]}</th>'
+        + "".join(f'<td{" class=is-giong" if n == 0 else ""}>{md(v)}</td>' for n, v in enumerate(row[1:]))
+        + "</tr>" for row in COMPARE)
+    milestones = "".join(
+        f'<li class="ms is-{state}"><p class="ms-v"><b>{v}</b><span>{state}</span></p>'
+        f'<h3>{name}</h3><ul>{"".join(f"<li>{md(x)}</li>" for x in items_)}</ul>'
+        + (f'<p class="ms-exit"><b>Done when:</b> {md(exit_)}</p>' if exit_ else "")
+        + "</li>" for v, name, state, items_, exit_ in ROADMAP)
+    nongoals = "".join(f"<li>{md(x)}</li>" for x in NON_GOALS)
+    examples = "".join(
+        f'<article class="ex"><h3><a href="{BLOB}examples/{name}.rs">examples/{name}.rs</a></h3>'
+        f'<p>{md(desc)}</p><pre class="code sm"><code>{html.escape(cmd)}'
+        + (f'\n<span class="c">{html.escape(then)}</span>' if then else "")
+        + "</code></pre></article>" for name, desc, cmd, then in EXAMPLES)
+    api = ([("API reference", f"https://docs.rs/{n}", f"docs.rs/{n}") for n in CRATE_NAMES] if ON_CRATES_IO
+           else [("API reference", f"{BLOB}src/lib.rs",
+                  "<code>cargo doc --open</code> in a clone; docs.rs once the crates are published")])
+    resources = [
+        *api,
+        ("Release notes", RELEASE, f"What is new in {TAG}"),
+        ("README", f"{REPO}#readme", "Design, every benchmark table, testing and limitations"),
+        ("Benchmarks", f"{TREE}bench", "The servers compared, the scripts and the raw results"),
+        ("Changelog", f"{BLOB}CHANGELOG.md", "Every change, release by release"),
+        ("Contributing", f"{BLOB}CONTRIBUTING.md", "Building, required checks, the rules for <code>unsafe</code> and cancellation"),
+        ("Issues", f"{REPO}/issues", "Bugs and proposals. For a bug, include <code>uname -r</code>, the Rust version and a small program"),
+        ("Security", SECURITY, "Report a vulnerability privately"),
+    ]
+    res_cards = "".join(f'<a class="res" href="{u}"><b>{h}</b><span>{d}</span></a>' for h, u, d in resources)
+    faq = "".join(f'<details class="qa"><summary>{q}</summary><p>{a}</p></details>' for q, a in FAQ)
     checked = "".join(f"<li>{md(x)}</li>" for x in t["checked"])
     unchecked = "".join(f"<li>{md(x)}</li>" for x in t["unchecked"])
     limits = "".join(f'<article class="limit"><h3>{h}</h3><p>{md(p)}</p></article>' for h, p in t["limit"])
@@ -580,7 +832,16 @@ def page():
 <meta property="og:image:width" content="1280">
 <meta property="og:image:height" content="640">
 <meta property="og:locale" content="en_US">
+<meta property="og:image:alt" content="The giong logo: a segmented ember ring">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{html.escape(t["title"])}">
+<meta name="twitter:description" content="{html.escape(t["desc"])}">
+<meta name="twitter:image" content="{SITE}assets/social-preview.png">
+<meta name="author" content="{AUTHOR}">
+<meta name="keywords" content="io_uring, Rust, async runtime, thread-per-core, Linux, HTTP server, TLS, Monoio, Glommio, Tokio">
+<link rel="author" href="{AUTHOR_URL}">
+<link rel="alternate" type="application/atom+xml" title="giong releases" href="{REPO}/releases.atom">
+<script type="application/ld+json">{json_ld()}</script>
 <link rel="icon" href="assets/favicon.ico" sizes="any">
 <link rel="icon" href="assets/giong-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/giong-icon-180.png">
@@ -596,6 +857,7 @@ def page():
     <a class="brand" href="#" aria-label="giong">{mark}<span>giong</span></a>
     <nav class="nav-links" aria-label="Sections">{nav}</nav>
     <div class="nav-side">
+      <a class="ver" href="{RELEASE}" title="Release notes for {TAG}">{TAG}</a>
       <a class="btn btn-sm" href="{REPO}">{GH_ICON}<span>GitHub</span></a>
     </div>
   </div>
@@ -612,7 +874,7 @@ def page():
         <a class="btn btn-main" href="#start">{t["cta_start"]}</a>
         <a class="btn" href="#numbers">{t["cta_numbers"]}</a>
       </div>
-      <div class="cmd"><code id="clone">{clone}</code><button class="copy" type="button" data-copy="clone" data-done="{t["copied"]}">{t["copy"]}</button></div>
+      <div class="cmd"><code id="hero-cmd">{html.escape(HERO_CMD)}</code><button class="copy" type="button" data-copy="hero-cmd" data-done="{t["copied"]}">{t["copy"]}</button></div>
     </div>
 
     <figure class="tick" id="tick" data-unit1="{t["tick_unit1"]}" data-unitn="{t["tick_unitn"]}">
@@ -661,6 +923,16 @@ def page():
   </div>
 </section>
 
+<section class="sec" id="compare">
+  <div class="wrap">
+    {head(t, t["compare"])}
+    <div class="table-scroll" tabindex="0" role="region" aria-label="{t["compare"][1]}">
+      <table class="cmp"><thead><tr>{cmp_head}</tr></thead><tbody>{cmp_rows}</tbody></table>
+    </div>
+    <p class="chart-src" style="margin-top:1rem">Source: <a href="{REPO}#compared-with-monoio-and-glommio">README, “Compared with Monoio and Glommio”</a></p>
+  </div>
+</section>
+
 <section class="sec" id="code">
   <div class="wrap">
     {head(t, t["code"])}
@@ -705,36 +977,97 @@ def page():
   </div>
 </section>
 
+<section class="sec" id="roadmap">
+  <div class="wrap">
+    {head(t, t["roadmap_sec"])}
+    <ol class="milestones">{milestones}</ol>
+    <div class="else"><h3>{t["nongoals_h"]}</h3><ul class="nongoals">{nongoals}</ul></div>
+    <p class="chart-src" style="margin-top:1rem">Source: <a href="{BLOB}ROADMAP.md">ROADMAP.md</a></p>
+  </div>
+</section>
+
 <section class="sec" id="start">
   <div class="wrap">
     {head(t, t["start"])}
     <div class="start">
       <dl class="reqs">{reqs}</dl>
-      <div>
-        <pre class="code" tabindex="0"><code>{shell(START_SH)}</code></pre>
-        <div class="start-cta">
-          <a class="btn btn-main" href="{REPO}">{GH_ICON}GitHub</a>
-          <a class="btn" href="{BLOB}ROADMAP.md">{t["roadmap"]}</a>
-          <a class="btn" href="{BLOB}CHANGELOG.md">{t["changelog"]}</a>
+      <div class="steps">
+        <div class="step">
+          <h3>{t["step_add"]}</h3>
+          <div class="code-copy"><pre class="code" tabindex="0"><code id="install">{shell(INSTALL_SH)}</code></pre><button class="copy" type="button" data-copy="install" data-done="{t["copied"]}">{t["copy"]}</button></div>
+          <p>{md(t["step_add_p"])}</p>
+        </div>
+        <div class="step">
+          <h3>{t["step_run"]}</h3>
+          <p>{t["step_run_p"]}</p>
+          <pre class="code" tabindex="0"><code>{shell(RUN_SH)}</code></pre>
+        </div>
+        <div class="step">
+          <h3>{t["step_src"]}</h3>
+          <pre class="code" tabindex="0"><code>{shell(FROM_SOURCE_SH)}</code></pre>
         </div>
       </div>
     </div>
+    <div class="examples-head"><h3>{t["examples_h"]}</h3><p>{t["examples_p"]} <a href="{TREE}examples">examples/</a></p></div>
+    <div class="examples">{examples}</div>
+  </div>
+</section>
+
+<section class="sec" id="resources">
+  <div class="wrap">
+    {head(t, t["resources"])}
+    <div class="res-grid">{res_cards}</div>
+    <div class="author">
+      <p>{t["made_by"]} <a href="{AUTHOR_URL}"><b>{AUTHOR}</b></a>, with contributions welcome from anyone.</p>
+      <div class="start-cta">
+        <a class="btn btn-main" href="{REPO}">{GH_ICON}Star or watch on GitHub</a>
+        <a class="btn" href="{BLOB}CONTRIBUTING.md">{t["contributing"]}</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="faq">
+  <div class="wrap">
+    {head(t, t["faq"])}
+    <div class="faq">{faq}</div>
   </div>
 </section>
 </main>
 
 <footer class="foot">
-  <div class="wrap foot-in">
-    <a class="brand" href="#" aria-label="giong">{mark.replace('width="32" height="32"', 'width="24" height="24"')}<span>giong</span></a>
-    <nav class="foot-links" aria-label="Project">
-      <a href="{REPO}">GitHub</a>
-      <a href="{BLOB}ROADMAP.md">{t["roadmap"]}</a>
-      <a href="{BLOB}CHANGELOG.md">{t["changelog"]}</a>
-      <a href="{BLOB}CONTRIBUTING.md">{t["contributing"]}</a>
-      <a href="{REPO}/issues">{t["issues"]}</a>
-    </nav>
-    <span>{t["foot"]}</span>
-    <span class="ramp" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <a class="brand" href="#" aria-label="giong">{mark.replace('width="32" height="32"', 'width="24" height="24"')}<span>giong</span></a>
+        <p>{t["foot_tag"]}</p>
+        <p>{t["made_by"]} <a href="{AUTHOR_URL}">{AUTHOR}</a>.</p>
+      </div>
+      <nav class="foot-col" aria-label="Project">
+        <h2>Project</h2>
+        <a href="{REPO}">GitHub</a>
+        <a href="{RELEASE}">Release notes</a>
+        <a href="{BLOB}CHANGELOG.md">{t["changelog"]}</a>
+        <a href="{BLOB}ROADMAP.md">{t["roadmap"]}</a>
+      </nav>
+      <nav class="foot-col" aria-label="Documentation">
+        <h2>Learn</h2>
+        <a href="#start">Get started</a>
+        <a href="{REPO}#readme">README</a>
+        <a href="{TREE}bench">Benchmarks</a>
+        {"".join(f'<a href="https://docs.rs/{n}">docs.rs/{n}</a>' for n in CRATE_NAMES) if ON_CRATES_IO else f'<a href="{TREE}examples">Examples</a>'}
+      </nav>
+      <nav class="foot-col" aria-label="Community">
+        <h2>Community</h2>
+        <a href="{REPO}/issues">{t["issues"]}</a>
+        <a href="{BLOB}CONTRIBUTING.md">{t["contributing"]}</a>
+        <a href="{SECURITY}">Report a vulnerability</a>
+      </nav>
+    </div>
+    <div class="foot-base">
+      <span>© 2026 {AUTHOR} and the giong contributors. {t["foot"]}</span>
+      <span class="ramp" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+    </div>
   </div>
 </footer>
 
@@ -747,5 +1080,12 @@ def page():
 if __name__ == "__main__":
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent / "public"
     out.mkdir(parents=True, exist_ok=True)
-    (out / "index.html").write_text(page(), encoding="utf-8")
-    print("wrote", out / "index.html")
+    files = {
+        "index.html": page(),
+        "404.html": not_found(),
+        "sitemap.xml": sitemap(),
+        "robots.txt": f"User-agent: *\nAllow: /\nSitemap: {SITE}sitemap.xml\n",
+    }
+    for name, text in files.items():
+        (out / name).write_text(text, encoding="utf-8", newline="\n")
+        print("wrote", out / name)
