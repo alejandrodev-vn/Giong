@@ -18,25 +18,31 @@ build on Windows or macOS; use WSL2 with a 6.x kernel, a virtual machine, or a c
 started with `--security-opt seccomp=unconfined` (Docker's default profile blocks io_uring).
 
 ```bash
-cargo build
-cargo test
+cargo build --workspace --all-features
+cargo test --workspace --all-features
 cargo run --release --example http
 ```
+
+The repository is a Cargo workspace of three crates: `giong` (the runtime, at the root),
+`giong-http` and `giong-tls`. The servers under `bench/` are separate workspaces.
 
 ## Checks every change must pass
 
 Continuous integration runs these, and so should you:
 
 ```bash
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
-RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
+scripts/check.sh test        # the whole suite in release mode, five times over
+scripts/check.sh fallback    # the same on the io_uring setups of kernels older than 6.1
 ```
 
-If you touched `unsafe` code, buffer handling or the driver, also run:
+If you touched `unsafe` code, buffer handling, the driver or anything that crosses
+threads, also run:
 
 ```bash
+scripts/check.sh tsan        # ThreadSanitizer; needs nightly with the rust-src component
 scripts/valgrind.sh          # needs valgrind; takes a few minutes
 ```
 
@@ -80,7 +86,8 @@ points at until the kernel reports completion, whatever happens to the Rust futu
 
 ### Dependencies and API
 
-- New dependencies need a reason. The runtime currently depends on three crates.
+- New dependencies need a reason. The runtime depends on three crates; `giong-tls` adds
+  `rustls`, and `giong-http` adds nothing.
 - Public items need documentation. Breaking changes to the public API need an issue first
   and an entry in the changelog.
 
@@ -99,7 +106,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/):
 **Types:** `feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `bench`, `ci`, `chore`.
 
 **Scopes:** `runtime`, `executor`, `driver`, `net`, `fs`, `time`, `sync`, `buf`,
-`examples`, `bench`. Leave the scope out when a change spans several.
+`http`, `tls`, `examples`, `bench`. Leave the scope out when a change spans several.
 
 Examples:
 
@@ -129,7 +136,9 @@ docs: explain how to run under WSL2
 ## Releases
 
 Maintainers cut releases: move the `Unreleased` entries under a new version heading with
-the date, bump `version` in `Cargo.toml`, tag the commit `vX.Y.Z`, and publish.
+the date, bump `version` in the three `Cargo.toml` files (the crates share one version
+number, and `giong-http` and `giong-tls` name the `giong` version they need), tag the
+commit `vX.Y.Z`, and publish with `cargo publish --workspace`.
 
 ## Security
 

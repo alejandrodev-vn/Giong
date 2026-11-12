@@ -18,41 +18,55 @@ These are deliberate. Proposals that need them will be declined.
 - **A general-purpose runtime.** giong is not trying to replace Tokio for every workload.
 - **`Send` futures as a requirement.** The API stays usable with `Rc` and `RefCell`.
 
-## 0.1 — Foundation (released)
+## 0.1 — Foundation (done)
 
 Executor, io_uring driver, TCP, UDP, files, timers, thread-per-core runtime, busy-poll
 mode, cross-thread channel, cancellation safety, backpressure, tests and benchmarks. See [CHANGELOG.md](CHANGELOG.md).
 
-## 0.2 — Prove it
+## 0.2 — A runtime you can serve from (this release)
 
-The 0.1 numbers come from a 2-vCPU virtual machine over loopback. Before adding features,
-find out what is actually true.
+0.2 took the pieces a real service needs first, wherever they stood in the earlier plan,
+together with the verification that needed no extra hardware.
+
+- [x] Graceful connection draining on shutdown (`Builder::shutdown_grace`).
+- [x] Unix domain sockets.
+- [x] Multishot receive for UDP.
+- [x] More file operations: metadata, rename, remove, directories.
+- [x] `giong-http`: an HTTP/1.1 server library grown out of the example.
+- [x] TLS through `rustls` (`giong-tls`, server side), and HTTPS in `giong-http`.
+- [x] Run the multi-threaded tests under ThreadSanitizer (nightly), locally and in CI.
+- [x] Verify the declared minimum Rust version in CI (1.80, libraries).
+- [x] Exercise the ring setup fallbacks by forcing them on a new kernel
+      (`GIONG_RING_TIER`).
+- [x] Compare against Monoio and Glommio on one core over loopback (see the README).
+- [x] A first two-core measurement (the load generator is the limit; see the README).
+- [x] Fuzz-style tests for the HTTP parser: 500,000 random inputs for the request parser
+      and the chunked decoder in `giong-http`.
+
+## 0.3 — Prove it
+
+The numbers so far come from a 4-vCPU virtual machine over loopback. Before adding more
+features, find out what is actually true.
 
 - [ ] Benchmark on a multi-core machine with the load generator on a separate host and a
       physical network card.
 - [ ] Measure scaling from 1 to N workers.
-- [x] Compare against Monoio and Glommio on one core over loopback (see the README).
-- [ ] Repeat that comparison on several cores and a physical network.
-- [ ] Run the multi-threaded tests under ThreadSanitizer (nightly).
+- [ ] Repeat the Monoio and Glommio comparison on several cores and a physical network.
+- [ ] Run the test suite on real 6.0 and 6.1 kernels.
 - [ ] Model-check the cross-thread wake-up handshake with `loom`.
-- [ ] Run the test suite on kernel 6.0 and 6.1 to exercise the ring setup fallbacks.
-- [ ] Verify the declared minimum Rust version in CI, and correct it if needed.
-- [ ] Fuzz the HTTP example's request parser.
+- [ ] Coverage-guided fuzzing (`cargo fuzz`) of the `giong-http` parser.
 - [ ] Add a soak test: hours of connection churn with fd and memory checks.
+- [ ] An independent look at `giong-tls` before anyone relies on it.
 
 **Exit criteria:** published multi-core results with their method, and no open memory- or
 thread-safety finding.
 
-## 0.3 — Breadth
+## 0.4 — Breadth
 
-What a real server needs beyond TCP.
-
-- [ ] Graceful connection draining on shutdown (wait for requests in progress, with a
-      deadline).
 - [ ] Vectored writes (`writev`) so a response head and body need no copy.
-- [ ] Unix domain sockets.
-- [ ] More file operations: metadata, rename, remove, directories, `fallocate`.
-- [ ] Multishot receive for UDP.
+- [ ] Streaming request and response bodies in `giong-http`.
+- [ ] The client side of `giong-tls`.
+- [ ] Remaining file operations: reading directories, `fallocate`.
 - [ ] Asynchronous DNS resolution (today `bind` and `connect` resolve names blocking).
 - [ ] A bounded channel and a oneshot channel in `sync`.
 - [ ] `spawn_on` that returns a handle to the spawned task's result.
@@ -60,7 +74,7 @@ What a real server needs beyond TCP.
 **Exit criteria:** every item above with tests, including cancellation tests for each new
 operation.
 
-## 0.4 — Speed
+## 0.5 — Speed
 
 Each item lands only with a benchmark showing what it buys.
 
@@ -69,21 +83,19 @@ Each item lands only with a benchmark showing what it buys.
 - [ ] Receive bundles (several buffers per completion).
 - [ ] Optional `SQPOLL` mode.
 - [ ] Optional NAPI busy polling.
+- [ ] Kernel TLS (kTLS) for `giong-tls`.
 - [ ] Per-worker statistics (tasks, operations, buffer pool pressure) as a public API.
 
 **Exit criteria:** a documented, reproducible gain for every option that is merged.
 
-## 0.5 — Ecosystem
+## 0.6 — Ecosystem
 
-Making giong usable for applications rather than only for hand-written servers.
-
-- [ ] `giong-http`: an HTTP/1.1 server library grown out of the example.
-- [ ] TLS through `rustls`.
+- [ ] HTTP/2 in `giong-http`.
 - [ ] Adapters for the `futures-io` / Tokio I/O traits, so protocol crates that are generic
       over the transport can run on giong.
 - [ ] Decide, based on demand, whether a hyper integration is worth maintaining.
 
-**Exit criteria:** an HTTPS server example serving real browsers.
+**Exit criteria:** an HTTPS server serving real browsers over HTTP/2.
 
 ## 1.0
 
