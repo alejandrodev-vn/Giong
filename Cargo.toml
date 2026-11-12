@@ -18,6 +18,10 @@ io-uring = "0.7"
 libc = "0.2"
 socket2 = { version = "0.6", features = ["all"] }
 
+[lints.rust]
+# Set by scripts/check.sh for ThreadSanitizer builds (see Driver::close_fd).
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(giong_tsan)'] }
+
 [profile.release]
 opt-level = 3
 lto = true

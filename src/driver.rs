@@ -154,31 +154,62 @@ pub(crate) struct Driver {
     closing: bool,
 }
 
+/// The io_uring setup tiers, best first. `build_ring` starts at the first tier
+/// the kernel accepts.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+enum RingTier {
+    /// Kernel >= 6.1: `SINGLE_ISSUER` + `DEFER_TASKRUN`.
+    Defer,
+    /// Kernel 5.19 / 6.0: `COOP_TASKRUN`.
+    Coop,
+    /// No task-run flags at all.
+    Basic,
+}
+
+/// Test hook: `GIONG_RING_TIER=coop|basic` skips the better tiers, so the
+/// fallback paths meant for older kernels can be exercised on a new one
+/// (`scripts/check.sh fallback`). Unset or unrecognised means "best available".
+fn first_tier() -> RingTier {
+    match std::env::var("GIONG_RING_TIER").as_deref() {
+        Ok("coop") => RingTier::Coop,
+        Ok("basic") => RingTier::Basic,
+        _ => RingTier::Defer,
+    }
+}
+
 fn build_ring(entries: u32) -> io::Result<IoUring> {
+    build_ring_from(entries, first_tier())
+}
+
+fn build_ring_from(entries: u32, first: RingTier) -> io::Result<IoUring> {
     let cq = entries.saturating_mul(4);
 
     // Preferred (kernel >= 6.1): completions are only processed when *we* enter
     // the kernel, on this thread — no IPIs, no surprise task work, best batching.
-    let mut b = IoUring::builder();
-    b.setup_single_issuer()
-        .setup_defer_taskrun()
-        .setup_taskrun_flag()
-        .setup_submit_all()
-        .setup_cqsize(cq)
-        .setup_clamp();
-    if let Ok(ring) = b.build(entries) {
-        return Ok(ring);
+    if first <= RingTier::Defer {
+        let mut b = IoUring::builder();
+        b.setup_single_issuer()
+            .setup_defer_taskrun()
+            .setup_taskrun_flag()
+            .setup_submit_all()
+            .setup_cqsize(cq)
+            .setup_clamp();
+        if let Ok(ring) = b.build(entries) {
+            return Ok(ring);
+        }
     }
 
     // Kernel 5.19 / 6.0.
-    let mut b = IoUring::builder();
-    b.setup_coop_taskrun()
-        .setup_taskrun_flag()
-        .setup_submit_all()
-        .setup_cqsize(cq)
-        .setup_clamp();
-    if let Ok(ring) = b.build(entries) {
-        return Ok(ring);
+    if first <= RingTier::Coop {
+        let mut b = IoUring::builder();
+        b.setup_coop_taskrun()
+            .setup_taskrun_flag()
+            .setup_submit_all()
+            .setup_cqsize(cq)
+            .setup_clamp();
+        if let Ok(ring) = b.build(entries) {
+            return Ok(ring);
+        }
     }
 
     let mut b = IoUring::builder();
@@ -426,12 +457,27 @@ impl Driver {
     }
 
     /// Closes a descriptor through the ring (batched with everything else).
+    #[cfg(not(giong_tsan))]
     pub(crate) fn close_fd(&mut self, fd: RawFd) {
         self.push(
             opcode::Close::new(types::Fd(fd))
                 .build()
                 .user_data(UD_IGNORE),
         );
+    }
+
+    /// ThreadSanitizer builds (`--cfg giong_tsan`, see `scripts/check.sh`) close
+    /// descriptors with `close(2)` instead.
+    ///
+    /// TSan keeps its own table of descriptors, fed only by the libc calls it
+    /// intercepts. A close through the ring is invisible to it, so when the
+    /// kernel hands the same number to another thread, TSan still believes it
+    /// belongs to the old socket and reports a race that does not exist.
+    #[cfg(giong_tsan)]
+    pub(crate) fn close_fd(&mut self, fd: RawFd) {
+        // SAFETY: the caller owns `fd` and gives it up here, exactly as with
+        // the ring-based close.
+        unsafe { libc::close(fd) };
     }
 
     pub(crate) fn pool(&self) -> &Rc<BufPool> {
@@ -664,5 +710,26 @@ impl Driver {
     /// Number of tracked operations (used by tests to detect leaks).
     pub(crate) fn tracked_ops(&self) -> usize {
         self.ops.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every setup tier must produce a working ring on a current kernel, so
+    /// that `GIONG_RING_TIER` really exercises the older-kernel paths.
+    #[test]
+    fn every_ring_tier_builds() {
+        // `SINGLE_ISSUER` is only requested by the preferred tier.
+        let coop = build_ring_from(64, RingTier::Coop).expect("coop tier");
+        assert!(!coop.params().is_setup_single_issuer());
+
+        let basic = build_ring_from(64, RingTier::Basic).expect("basic tier");
+        assert!(!basic.params().is_setup_single_issuer());
+
+        // The preferred tier may legitimately fall back on an old kernel, but
+        // it must always yield a ring.
+        build_ring_from(64, RingTier::Defer).expect("default tier");
     }
 }
