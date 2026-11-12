@@ -5,7 +5,7 @@ change has to satisfy before it is merged, and how to write commits.
 
 ## Before you start
 
-- For anything larger than a small fix, **[open an issue](https://github.com/thekivashyn/Giong/issues) first** and describe
+- For anything larger than a small fix, **[open an issue](https://github.com/giong-run/Giong/issues) first** and describe
   what you want to change. It avoids duplicated work and patches that do not fit the design.
 - Check [ROADMAP.md](ROADMAP.md), including its non-goals.
 - Bugs: include the kernel version (`uname -r`), the Rust version, and the smallest
@@ -144,7 +144,7 @@ commit `vX.Y.Z`, and publish with `cargo publish --workspace`.
 
 Please do not open a public issue for a vulnerability such as a memory-safety bug that
 can be triggered remotely. Report it privately at
-<https://github.com/thekivashyn/Giong/security/advisories/new> so it can be fixed before it is disclosed.
+<https://github.com/giong-run/Giong/security/advisories/new> so it can be fixed before it is disclosed.
 
 ## Conduct
 

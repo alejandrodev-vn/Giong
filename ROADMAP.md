@@ -1,7 +1,7 @@
 # Roadmap
 
 Where giong is going, in the order we intend to get there. Nothing here has a date:
-a milestone is done when its exit criteria are met. [Open an issue](https://github.com/thekivashyn/Giong/issues) before starting on
+a milestone is done when its exit criteria are met. [Open an issue](https://github.com/giong-run/Giong/issues) before starting on
 an item so the work is not duplicated.
 
 ## Goal

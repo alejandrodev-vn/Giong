@@ -8,7 +8,7 @@
 <p align="center"><b>Async runtime cho Linux theo mô hình thread-per-core, xây thẳng trên io_uring.</b></p>
 
 <p align="center">
-  <a href="https://github.com/thekivashyn/Giong/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/thekivashyn/Giong/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/giong-run/Giong/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/giong-run/Giong/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue">
   <img alt="Platform: Linux 6.0+" src="https://img.shields.io/badge/platform-Linux%206.0%2B-informational">
 </p>
@@ -88,7 +88,7 @@ Cách đọc cho đúng:
 ## Chạy thử
 
 ```bash
-git clone https://github.com/thekivashyn/Giong.git && cd Giong
+git clone https://github.com/giong-run/Giong.git && cd Giong
 cargo test --workspace --all-features   # toàn bộ test của ba crate
 cargo run --release --example echo      # echo server, cổng 7000
 cargo run --release --example http      # HTTP server tự viết, cổng 3006
@@ -152,7 +152,7 @@ Muốn HTTPS thì bật feature `tls` và gọi `serve_tls` với một `giong_t
 
 ## Tài liệu khác
 
-- Mã nguồn và issue: <https://github.com/thekivashyn/Giong>
+- Mã nguồn và issue: <https://github.com/giong-run/Giong>
 - [README.md](README.md): thiết kế chi tiết, benchmark đầy đủ, kiểm thử, so sánh với Monoio và Glommio.
 - [CONTRIBUTING.md](CONTRIBUTING.md), [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md).
 

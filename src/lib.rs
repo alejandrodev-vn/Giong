@@ -62,8 +62,8 @@
 //! platforms.
 
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/thekivashyn/Giong/main/assets/giong-icon.svg",
-    html_favicon_url = "https://raw.githubusercontent.com/thekivashyn/Giong/main/assets/giong-icon.svg"
+    html_logo_url = "https://raw.githubusercontent.com/giong-run/Giong/main/assets/giong-icon.svg",
+    html_favicon_url = "https://raw.githubusercontent.com/giong-run/Giong/main/assets/giong-icon.svg"
 )]
 
 #[cfg(not(target_os = "linux"))]

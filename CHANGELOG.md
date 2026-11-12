@@ -152,6 +152,6 @@ timers and cross-thread messaging. Not production-tested; see the limitations in
 - The declared minimum Rust version (1.80) and the fallback paths for kernel 6.0 have not
   been exercised yet.
 
-[Unreleased]: https://github.com/thekivashyn/Giong/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/thekivashyn/Giong/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/thekivashyn/Giong/releases/tag/v0.1.0
+[Unreleased]: https://github.com/giong-run/Giong/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/giong-run/Giong/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/giong-run/Giong/releases/tag/v0.1.0
