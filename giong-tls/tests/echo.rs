@@ -1,0 +1,360 @@
+//! A TLS echo server on giong, driven by a blocking rustls client.
+
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpStream};
+use std::sync::{mpsc, Arc};
+use std::time::Duration;
+
+use giong::net::TcpListener;
+use giong::time::timeout;
+use giong_tls::rustls::pki_types::{CertificateDer, ServerName};
+use giong_tls::rustls::{self, ClientConfig, ClientConnection, RootCertStore, StreamOwned};
+use giong_tls::{TlsAcceptor, TlsStream};
+
+type Client = StreamOwned<ClientConnection, TcpStream>;
+
+struct Certs {
+    acceptor: TlsAcceptor,
+    client: Arc<ClientConfig>,
+}
+
+fn certs(versions: &[&'static rustls::SupportedProtocolVersion]) -> Certs {
+    let key = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+    let cert_pem = key.cert.pem();
+    let key_pem = key.key_pair.serialize_pem();
+    let acceptor = TlsAcceptor::from_pem(cert_pem.as_bytes(), key_pem.as_bytes()).unwrap();
+
+    let mut roots = RootCertStore::empty();
+    roots
+        .add(CertificateDer::from(key.cert.der().to_vec()))
+        .unwrap();
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let client = ClientConfig::builder_with_provider(provider)
+        .with_protocol_versions(versions)
+        .unwrap()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    Certs {
+        acceptor,
+        client: Arc::new(client),
+    }
+}
+
+fn connect(addr: SocketAddr, config: &Arc<ClientConfig>) -> Client {
+    let tcp = TcpStream::connect(addr).unwrap();
+    tcp.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let name = ServerName::try_from("localhost").unwrap();
+    StreamOwned::new(ClientConnection::new(config.clone(), name).unwrap(), tcp)
+}
+
+/// Runs `serve` for every accepted TLS connection until the client side of the
+/// test is done.
+fn with_server<F, Fut>(acceptor: TlsAcceptor, serve: F, client: impl FnOnce(SocketAddr))
+where
+    F: Fn(TlsStream) -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future<Output = ()> + 'static,
+{
+    let rt = giong::Builder::new().workers(1).build().unwrap();
+    let handle = rt.handle();
+    let (tx, rx) = mpsc::channel();
+    let serve = Arc::new(serve);
+    let server = std::thread::spawn(move || {
+        rt.run(move |_| {
+            let (tx, acceptor, serve) = (tx.clone(), acceptor.clone(), serve.clone());
+            async move {
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                tx.send(listener.local_addr().unwrap()).unwrap();
+                while let Some(Ok(tcp)) = giong::until_shutdown(listener.accept()).await {
+                    let (acceptor, serve) = (acceptor.clone(), serve.clone());
+                    giong::spawn(async move {
+                        if let Ok(tls) = acceptor.accept(tcp).await {
+                            serve(tls).await;
+                        }
+                    });
+                }
+            }
+        })
+        .unwrap();
+    });
+    client(rx.recv().unwrap());
+    handle.shutdown();
+    server.join().unwrap();
+}
+
+async fn echo(tls: TlsStream) {
+    while let Ok(data) = tls.recv().await {
+        if data.is_empty() {
+            break;
+        }
+        if tls.write_all(data).await.0.is_err() {
+            return;
+        }
+    }
+    let _ = tls.shutdown().await;
+}
+
+fn roundtrip(versions: &[&'static rustls::SupportedProtocolVersion]) {
+    let c = certs(versions);
+    let client_config = c.client.clone();
+    with_server(c.acceptor, echo, move |addr| {
+        let mut client = connect(addr, &client_config);
+        client.write_all(b"hello over tls").unwrap();
+        let mut buf = [0u8; 14];
+        client.read_exact(&mut buf).unwrap();
+        assert_eq!(&buf, b"hello over tls");
+
+        // Several megabytes in each direction, written while reading.
+        let data: Vec<u8> = (0..4_000_000u32).map(|i| (i % 253) as u8).collect();
+        let expected = data.clone();
+        let mut reader = connect(addr, &client_config);
+        reader.write_all(&data[..1000]).unwrap();
+        let mut got = vec![0u8; 1000];
+        reader.read_exact(&mut got).unwrap();
+        assert_eq!(got, &expected[..1000]);
+        // Interleave: send a slice, read it back, so neither side stalls.
+        for piece in data[1000..].chunks(200_000) {
+            reader.write_all(piece).unwrap();
+            let mut back = vec![0u8; piece.len()];
+            reader.read_exact(&mut back).unwrap();
+            assert!(back == piece);
+        }
+
+        // A clean close: our close_notify is answered with one.
+        client.conn.send_close_notify();
+        client.flush().unwrap();
+        while client.conn.wants_write() {
+            client.conn.write_tls(&mut client.sock).unwrap();
+        }
+        let mut rest = Vec::new();
+        client.read_to_end(&mut rest).unwrap();
+        assert!(rest.is_empty());
+    });
+}
+
+#[test]
+fn echoes_over_tls_1_3() {
+    roundtrip(&[&rustls::version::TLS13]);
+}
+
+#[test]
+fn echoes_over_tls_1_2() {
+    roundtrip(&[&rustls::version::TLS12]);
+}
+
+#[test]
+fn alpn_is_negotiated() {
+    let c = certs(rustls::ALL_VERSIONS);
+    let mut config = (*c.client).clone();
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    let config = Arc::new(config);
+    async fn report(tls: TlsStream) {
+        let alpn = tls.alpn_protocol().unwrap_or_default();
+        let _ = tls.write_all(alpn).await;
+        let _ = tls.shutdown().await;
+    }
+    with_server(c.acceptor, report, move |addr| {
+        let mut client = connect(addr, &config);
+        let mut got = Vec::new();
+        client.read_to_end(&mut got).unwrap();
+        assert_eq!(got, b"http/1.1");
+        assert_eq!(client.conn.alpn_protocol(), Some(&b"http/1.1"[..]));
+    });
+}
+
+#[test]
+fn recv_is_cancel_safe() {
+    // The server wraps every `recv` in a timeout far shorter than the gaps
+    // between the client's writes, so most of them are cancelled.
+    async fn impatient(tls: TlsStream) {
+        loop {
+            match timeout(Duration::from_millis(2), tls.recv()).await {
+                Err(_) => continue,
+                Ok(Ok(data)) if !data.is_empty() => {
+                    if tls.write_all(data).await.0.is_err() {
+                        return;
+                    }
+                }
+                Ok(_) => break,
+            }
+        }
+        let _ = tls.shutdown().await;
+    }
+    let c = certs(rustls::ALL_VERSIONS);
+    let config = c.client.clone();
+    with_server(c.acceptor, impatient, move |addr| {
+        let mut client = connect(addr, &config);
+        let mut expected = Vec::new();
+        for i in 0..60u32 {
+            let piece = format!("piece-{i};").into_bytes();
+            client.write_all(&piece).unwrap();
+            client.flush().unwrap();
+            expected.extend_from_slice(&piece);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let mut got = vec![0u8; expected.len()];
+        client.read_exact(&mut got).unwrap();
+        assert_eq!(got, expected);
+    });
+}
+
+#[test]
+fn bad_handshakes_fail_without_harming_the_server() {
+    let c = certs(rustls::ALL_VERSIONS);
+    let acceptor = c.acceptor.handshake_timeout(Duration::from_millis(300));
+    let config = c.client.clone();
+    with_server(acceptor, echo, move |addr| {
+        // Not TLS at all.
+        let mut plain = TcpStream::connect(addr).unwrap();
+        plain
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        plain
+            .write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+            .unwrap();
+        let mut reply = Vec::new();
+        let _ = plain.read_to_end(&mut reply);
+        assert!(
+            !reply.starts_with(b"HTTP/"),
+            "answered plain HTTP on a TLS port"
+        );
+
+        // A client that connects and never speaks is dropped after the
+        // handshake timeout.
+        let mut silent = TcpStream::connect(addr).unwrap();
+        silent
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let start = std::time::Instant::now();
+        let mut buf = [0u8; 16];
+        assert_eq!(silent.read(&mut buf).unwrap_or(0), 0);
+        assert!(start.elapsed() >= Duration::from_millis(250));
+        assert!(start.elapsed() < Duration::from_secs(5));
+
+        // A client that does not trust the certificate.
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let distrustful = ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(RootCertStore::empty())
+            .with_no_client_auth();
+        let mut client = connect(addr, &Arc::new(distrustful));
+        assert!(client.write_all(b"x").is_err());
+
+        // The server still works. (On a slow machine a handshake may take
+        // longer than the short timeout, so try a few times.)
+        let alive = (0..20).any(|_| {
+            let mut client = connect(addr, &config);
+            let mut buf = [0u8; 11];
+            client.write_all(b"still alive").is_ok()
+                && client.read_exact(&mut buf).is_ok()
+                && &buf == b"still alive"
+        });
+        assert!(alive);
+    });
+}
+
+#[test]
+fn one_task_may_receive_while_another_sends() {
+    // The echo task and a second task write to the same connection at the
+    // same time; the client would fail to decrypt interleaved records.
+    const TICKS: usize = 200;
+    async fn split(tls: TlsStream) {
+        let tls = std::rc::Rc::new(tls);
+        let ticker = {
+            let tls = tls.clone();
+            giong::spawn(async move {
+                for _ in 0..TICKS {
+                    if tls.write_all(vec![b'T'; 20_000]).await.0.is_err() {
+                        return;
+                    }
+                    giong::yield_now().await;
+                }
+            })
+        };
+        while let Ok(data) = tls.recv().await {
+            if data.is_empty() || tls.write_all(data).await.0.is_err() {
+                break;
+            }
+        }
+        let _ = ticker.await;
+        let _ = tls.shutdown().await;
+    }
+    let c = certs(rustls::ALL_VERSIONS);
+    let config = c.client.clone();
+    with_server(c.acceptor, split, move |addr| {
+        let mut client = connect(addr, &config);
+        let writer_tcp = client.sock.try_clone().unwrap();
+        client.write_all(b"e").unwrap(); // completes the handshake
+        let echoed = 300 * 10_000 + 1;
+        let total = echoed + TICKS * 20_000;
+        let (mut ticks, mut echoes) = (0usize, 0usize);
+        let mut chunk = vec![0u8; 64 * 1024];
+        let mut sent = 0;
+        // Send in pieces while reading, so that neither side stalls.
+        while ticks + echoes < total {
+            if sent < 300 {
+                client.write_all(&[b'e'; 10_000]).unwrap();
+                client.flush().unwrap();
+                sent += 1;
+            }
+            let n = client.read(&mut chunk).unwrap();
+            assert!(n > 0, "closed after {} of {total} bytes", ticks + echoes);
+            ticks += chunk[..n].iter().filter(|&&b| b == b'T').count();
+            echoes += chunk[..n].iter().filter(|&&b| b == b'e').count();
+        }
+        assert_eq!((ticks, echoes), (TICKS * 20_000, echoed));
+        drop(writer_tcp);
+    });
+}
+
+#[test]
+fn a_cancelled_write_poisons_the_connection_instead_of_corrupting_it() {
+    let (tx, rx) = mpsc::channel();
+    let c = certs(rustls::ALL_VERSIONS);
+    let config = c.client.clone();
+    let serve = move |tls: TlsStream| {
+        let tx = tx.clone();
+        async move {
+            // Wait for the client's first byte, then write far more than the
+            // socket buffers hold to a client that is not reading.
+            let _ = tls.recv().await;
+            let big = vec![7u8; 64 << 20];
+            let cancelled = timeout(Duration::from_millis(100), tls.write_all(big))
+                .await
+                .is_err();
+            let later = tls.write_all(b"more".to_vec()).await.0;
+            let _ = tx.send((cancelled, later.is_err()));
+            // What the client sent before can still be received.
+            let _ = tx.send((tls.recv().await.ok() == Some(b"second".to_vec()), true));
+        }
+    };
+    with_server(c.acceptor, serve, move |addr| {
+        let mut client = connect(addr, &config);
+        client.write_all(b"x").unwrap();
+        client.flush().unwrap();
+        let wait = Duration::from_secs(10);
+        assert_eq!(rx.recv_timeout(wait).unwrap(), (true, true));
+        client.write_all(b"second").unwrap();
+        client.flush().unwrap();
+        assert_eq!(rx.recv_timeout(wait).unwrap(), (true, true));
+
+        // The server has dropped the connection in the middle of a record.
+        // The client must see a cut-off stream, never the bytes of "more"
+        // spliced into the record that was being sent.
+        let mut sink = vec![0u8; 1 << 20];
+        let err = loop {
+            match client.read(&mut sink) {
+                Ok(0) => panic!("a cut-off stream looked like a clean close"),
+                Ok(n) => assert!(sink[..n].iter().all(|&b| b == 7)),
+                Err(e) => break e,
+            }
+        };
+        assert!(
+            matches!(
+                err.kind(),
+                std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::ConnectionReset
+            ),
+            "{err}"
+        );
+    });
+}

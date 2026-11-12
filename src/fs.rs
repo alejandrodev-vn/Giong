@@ -1,37 +1,43 @@
 //! Files on io_uring.
 //!
-//! Every operation — open, read, write, sync, close — goes through the ring,
-//! so file I/O never blocks the worker thread and needs no helper thread pool
-//! in user space.
-//!
-//! Reads and writes are **positional** (`read_at`, `write_at`): a file has no
-//! implicit cursor, so one `File` can serve many tasks at once.
+//! Unlike sockets, regular files are never "ready" in the `epoll` sense, which
+//! is why other runtimes send file I/O to a pool of blocking threads. With
+//! io_uring it goes through the same ring as everything else: opens, reads,
+//! writes and syncs are submitted and completed in the same batches as
+//! network I/O, and the worker thread never blocks on the disk.
 //!
 //! ```no_run
-//! use giong::fs::File;
+//! use giong::fs::{self, File};
 //!
 //! # async fn demo() -> std::io::Result<()> {
-//! let file = File::create("hello.txt").await?;
-//! let (res, _buf) = file.write_all_at(b"hello".to_vec(), 0).await;
-//! res?;
-//! file.sync_all().await?;
+//! // Whole files.
+//! fs::write("hello.txt", "xin chào").await?;
+//! let text = fs::read("hello.txt").await?;
+//! assert_eq!(text, "xin chào".as_bytes());
 //!
-//! let file = File::open("hello.txt").await?;
-//! let (res, buf) = file.read_at(Vec::with_capacity(64), 0).await;
-//! assert_eq!(&buf[..res?], b"hello");
-//! # Ok(())
+//! // Reads and writes at an offset.
+//! let file = File::options().read(true).write(true).open("hello.txt").await?;
+//! let (res, _) = file.write_all_at("XIN", 0).await;
+//! res?;
+//! let (res, buf) = file.read_at(Vec::with_capacity(3), 0).await;
+//! assert_eq!((res?, &buf[..]), (3, &b"XIN"[..]));
+//! file.sync_all().await?;
+//! file.close().await?;
+//! fs::remove_file("hello.txt").await
 //! # }
 //! ```
+//!
+//! A [`File`] has no cursor: every read and write names its offset, so one
+//! file can be shared by many tasks without them disturbing each other.
 
 use std::ffi::CString;
-use std::future::Future;
 use std::io;
 use std::marker::PhantomData;
-use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
+use std::mem;
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::time::{Duration, SystemTime};
 
 use io_uring::{opcode, types};
 
@@ -43,7 +49,28 @@ fn os_err(res: i32) -> io::Error {
     io::Error::from_raw_os_error(-res)
 }
 
-/// Options for opening a file, mirroring [`std::fs::OpenOptions`].
+fn c_path(path: &Path) -> io::Result<CString> {
+    CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte"))
+}
+
+fn cwd() -> types::Fd {
+    types::Fd(libc::AT_FDCWD)
+}
+
+/// Runs an operation whose only resource is one path.
+async fn path_op(path: CString, sqe: io_uring::squeue::Entry) -> io::Result<i32> {
+    let (res, _, _path) = Op::new(sqe, path).await;
+    if res < 0 {
+        Err(os_err(res))
+    } else {
+        Ok(res)
+    }
+}
+
+/// How a file is opened; see [`File::options`].
+///
+/// The options are those of [`std::fs::OpenOptions`].
 #[derive(Clone, Debug)]
 pub struct OpenOptions {
     read: bool,
@@ -53,16 +80,11 @@ pub struct OpenOptions {
     create: bool,
     create_new: bool,
     mode: u32,
-}
-
-impl Default for OpenOptions {
-    fn default() -> Self {
-        Self::new()
-    }
+    custom_flags: i32,
 }
 
 impl OpenOptions {
-    /// All options off; files are created with mode `0o666` (before umask).
+    /// All options off; permissions `0o666` (before the umask) for new files.
     pub fn new() -> Self {
         Self {
             read: false,
@@ -72,6 +94,7 @@ impl OpenOptions {
             create: false,
             create_new: false,
             mode: 0o666,
+            custom_flags: 0,
         }
     }
 
@@ -87,14 +110,13 @@ impl OpenOptions {
         self
     }
 
-    /// Open for appending: every write goes to the end of the file,
-    /// whatever offset is passed to `write_at`.
+    /// Every write goes to the end of the file, whatever offset it names.
     pub fn append(mut self, append: bool) -> Self {
         self.append = append;
         self
     }
 
-    /// Truncate the file to zero length when opening it.
+    /// Cut the file to length zero when opening it.
     pub fn truncate(mut self, truncate: bool) -> Self {
         self.truncate = truncate;
         self
@@ -112,68 +134,68 @@ impl OpenOptions {
         self
     }
 
-    /// Permission bits used when a file is created.
+    /// Permission bits for a newly created file.
     pub fn mode(mut self, mode: u32) -> Self {
         self.mode = mode;
         self
     }
 
+    /// Extra `open(2)` flags, for example `libc::O_DIRECT`.
+    pub fn custom_flags(mut self, flags: i32) -> Self {
+        self.custom_flags = flags;
+        self
+    }
+
     fn flags(&self) -> io::Result<i32> {
-        let invalid = || io::Error::from(io::ErrorKind::InvalidInput);
-        let access = match (self.read, self.write || self.append) {
-            (true, false) => libc::O_RDONLY,
-            (false, true) => libc::O_WRONLY,
-            (true, true) => libc::O_RDWR,
-            (false, false) => return Err(invalid()),
+        let invalid = || io::Error::from_raw_os_error(libc::EINVAL);
+        let access = match (self.read, self.write, self.append) {
+            (true, false, false) => libc::O_RDONLY,
+            (false, true, false) => libc::O_WRONLY,
+            (true, true, false) => libc::O_RDWR,
+            (false, _, true) => libc::O_WRONLY | libc::O_APPEND,
+            (true, _, true) => libc::O_RDWR | libc::O_APPEND,
+            (false, false, false) => return Err(invalid()),
         };
         let writable = self.write || self.append;
         if !writable && (self.truncate || self.create || self.create_new) {
             return Err(invalid());
         }
-        if self.append && self.truncate {
+        if self.append && self.truncate && !self.create_new {
             return Err(invalid());
         }
-        let mut flags = access | libc::O_CLOEXEC;
-        if self.append {
-            flags |= libc::O_APPEND;
-        }
-        if self.truncate {
-            flags |= libc::O_TRUNC;
-        }
-        if self.create_new {
-            flags |= libc::O_CREAT | libc::O_EXCL;
-        } else if self.create {
-            flags |= libc::O_CREAT;
-        }
-        Ok(flags)
+        let creation = match (self.create, self.truncate, self.create_new) {
+            (_, _, true) => libc::O_CREAT | libc::O_EXCL,
+            (false, false, false) => 0,
+            (true, false, false) => libc::O_CREAT,
+            (false, true, false) => libc::O_TRUNC,
+            (true, true, false) => libc::O_CREAT | libc::O_TRUNC,
+        };
+        Ok(access | creation | libc::O_CLOEXEC | self.custom_flags)
     }
 
-    /// Opens the file at `path` with these options.
-    pub async fn open(&self, path: impl AsRef<Path>) -> io::Result<File> {
+    /// Opens `path` with these options.
+    pub async fn open<P: AsRef<Path>>(&self, path: P) -> io::Result<File> {
         let flags = self.flags()?;
-        // The kernel reads the path when the operation runs, so it must stay
-        // alive (and in place) until then: a `CString` keeps it on the heap.
-        let path = CString::new(path.as_ref().as_os_str().as_bytes())
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte"))?;
-        let sqe = opcode::OpenAt::new(types::Fd(libc::AT_FDCWD), path.as_ptr())
+        let path = c_path(path.as_ref())?;
+        let sqe = opcode::OpenAt::new(cwd(), path.as_ptr())
             .flags(flags)
-            .mode(self.mode as libc::mode_t)
+            .mode(self.mode)
             .build();
-        let (res, _, _path) = Op::new(sqe, path).await;
-        if res < 0 {
-            return Err(os_err(res));
-        }
-        Ok(File {
-            fd: res,
-            _not_send: PhantomData,
-        })
+        let fd = path_op(path, sqe).await?;
+        Ok(File::from_fd(fd))
+    }
+}
+
+impl Default for OpenOptions {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 /// An open file.
 ///
-/// Dropping a `File` closes it in the background. Use [`File::close`] to
-/// learn whether the close succeeded.
+/// All methods take `&self` and name the offset they work at, so a file can
+/// be shared (e.g. in an `Rc`) by any number of tasks.
 pub struct File {
     fd: RawFd,
     _not_send: PhantomData<*const ()>,
@@ -181,13 +203,13 @@ pub struct File {
 
 impl File {
     /// Opens an existing file for reading.
-    pub async fn open(path: impl AsRef<Path>) -> io::Result<File> {
+    pub async fn open<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         OpenOptions::new().read(true).open(path).await
     }
 
-    /// Opens a file for writing, creating it if needed and truncating it if
-    /// it exists.
-    pub async fn create(path: impl AsRef<Path>) -> io::Result<File> {
+    /// Opens a file for writing, creating it if needed and emptying it if it
+    /// exists.
+    pub async fn create<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         OpenOptions::new()
             .write(true)
             .create(true)
@@ -196,22 +218,33 @@ impl File {
             .await
     }
 
-    /// A fresh set of [`OpenOptions`].
+    /// Options for opening a file in any other way.
     pub fn options() -> OpenOptions {
         OpenOptions::new()
     }
 
     /// Wraps a file opened by the standard library.
-    pub fn from_std(file: std::fs::File) -> File {
-        File {
-            fd: file.into_raw_fd(),
+    pub fn from_std(file: std::fs::File) -> Self {
+        Self::from_fd(file.into_raw_fd())
+    }
+
+    fn from_fd(fd: RawFd) -> Self {
+        Self {
+            fd,
             _not_send: PhantomData,
         }
     }
 
-    /// Reads up to `buf.capacity()` bytes starting at `offset`, into the start
-    /// of `buf`, and returns the buffer with its length set to the bytes read.
-    /// `Ok(0)` means `offset` is at or past the end of the file.
+    /// Reads at `offset` into `buf` (from its start, up to its capacity),
+    /// returning the buffer with its length set to the bytes read. `Ok(0)`
+    /// means `offset` is at or past the end of the file.
+    ///
+    /// Like `read(2)`, this may return fewer bytes than there is room for.
+    ///
+    /// Dropping the future is harmless for a regular file. If the descriptor
+    /// is a pipe or a device, a read that is dropped while in flight may
+    /// still take data that arrives before the kernel has processed the
+    /// cancellation, and that data is lost.
     pub async fn read_at<B: IoBufMut>(&self, mut buf: B, offset: u64) -> (io::Result<usize>, B) {
         let len = buf.capacity().min(u32::MAX as usize) as u32;
         let sqe = opcode::Read::new(types::Fd(self.fd), buf.as_mut_ptr(), len)
@@ -226,15 +259,14 @@ impl File {
         (Ok(res as usize), buf)
     }
 
-    /// Writes some bytes of `buf` at `offset`, returning how many were written.
-    ///
-    /// If the returned future is dropped before it completes, the write may
-    /// still take place.
+    /// Writes some bytes of `buf` at `offset`, returning how many were
+    /// written.
     pub async fn write_at<B: IoBuf>(&self, buf: B, offset: u64) -> (io::Result<usize>, B) {
         self.write_from(buf, 0, offset).await
     }
 
-    /// Writes all of `buf` starting at `offset`.
+    /// Writes all of `buf` at `offset`. The buffer is handed back so it can be
+    /// reused.
     pub async fn write_all_at<B: IoBuf>(&self, mut buf: B, offset: u64) -> (io::Result<()>, B) {
         let mut written = 0;
         while written < buf.len() {
@@ -271,12 +303,12 @@ impl File {
         }
     }
 
-    /// Flushes file data and metadata to the storage device (`fsync`).
+    /// Flushes data and metadata to the storage device (`fsync`).
     pub async fn sync_all(&self) -> io::Result<()> {
         self.fsync(types::FsyncFlags::empty()).await
     }
 
-    /// Flushes file data, but not necessarily metadata such as timestamps
+    /// Flushes data, and only the metadata needed to read it back
     /// (`fdatasync`).
     pub async fn sync_data(&self) -> io::Result<()> {
         self.fsync(types::FsyncFlags::DATASYNC).await
@@ -292,11 +324,20 @@ impl File {
         }
     }
 
-    /// The size of the file in bytes.
+    /// Size, type and modification time of the file.
+    pub async fn metadata(&self) -> io::Result<Metadata> {
+        // An empty path with AT_EMPTY_PATH means "the descriptor itself".
+        statx(types::Fd(self.fd), CString::default(), libc::AT_EMPTY_PATH).await
+    }
+
+    /// The size of the file in bytes, read with a plain `fstat` (a system
+    /// call that does not wait for the disk). [`metadata`](Self::metadata)
+    /// returns the same number, together with everything else, through the
+    /// ring.
     pub fn len(&self) -> io::Result<u64> {
         // SAFETY: borrows the descriptor for the duration of the call; the
         // `ManuallyDrop` keeps the temporary `std::fs::File` from closing it.
-        let file = std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(self.fd) });
+        let file = mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(self.fd) });
         Ok(file.metadata()?.len())
     }
 
@@ -305,52 +346,12 @@ impl File {
         Ok(self.len()? == 0)
     }
 
-    /// Closes the file and reports whether that succeeded.
+    /// Closes the file and reports the result. Dropping a `File` closes it
+    /// too, but cannot report an error.
     pub async fn close(self) -> io::Result<()> {
         let fd = self.fd;
-        // From here on the `Close` future owns the descriptor.
-        std::mem::forget(self);
-        let sqe = opcode::Close::new(types::Fd(fd)).build();
-        let res = Close {
-            op: Op::new(sqe, ()),
-            fd,
-            submitted: false,
-        }
-        .await;
-        if res < 0 {
-            Err(os_err(res))
-        } else {
-            Ok(())
-        }
-    }
-}
-
-/// The future behind [`File::close`]. Makes sure the descriptor is closed
-/// exactly once, whenever the future is dropped.
-struct Close {
-    op: Op<()>,
-    fd: RawFd,
-    /// The close has been handed to the driver, which will carry it out even
-    /// if this future goes away.
-    submitted: bool,
-}
-
-impl Future for Close {
-    type Output = i32;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<i32> {
-        // The first poll of an `Op` always submits it.
-        self.submitted = true;
-        Pin::new(&mut self.op).poll(cx).map(|(res, _, ())| res)
-    }
-}
-
-impl Drop for Close {
-    fn drop(&mut self) {
-        if !self.submitted {
-            // SAFETY: we own the descriptor and nobody else will close it.
-            drop(unsafe { OwnedFd::from_raw_fd(self.fd) });
-        }
+        mem::forget(self);
+        close(fd).await
     }
 }
 
@@ -363,7 +364,8 @@ impl AsRawFd for File {
 impl Drop for File {
     fn drop(&mut self) {
         let fd = self.fd;
-        let queued = runtime::try_with_worker(|w| match w.driver.try_borrow_mut() {
+        // Through the current worker's ring, or directly if there is none.
+        let closed = runtime::try_with_worker(|w| match w.driver.try_borrow_mut() {
             Ok(mut driver) => {
                 driver.close_fd(fd);
                 true
@@ -371,9 +373,9 @@ impl Drop for File {
             Err(_) => false,
         })
         .unwrap_or(false);
-        if !queued {
-            // SAFETY: we own the descriptor and close it exactly once.
-            drop(unsafe { OwnedFd::from_raw_fd(fd) });
+        if !closed {
+            // SAFETY: the descriptor is ours and is closed exactly once.
+            unsafe { libc::close(fd) };
         }
     }
 }
@@ -381,5 +383,196 @@ impl Drop for File {
 impl std::fmt::Debug for File {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("File").field("fd", &self.fd).finish()
+    }
+}
+
+#[cfg(not(giong_tsan))]
+async fn close(fd: RawFd) -> io::Result<()> {
+    let sqe = opcode::Close::new(types::Fd(fd)).build();
+    let (res, _, ()) = Op::new(sqe, ()).await;
+    if res < 0 {
+        Err(os_err(res))
+    } else {
+        Ok(())
+    }
+}
+
+/// ThreadSanitizer keeps track of descriptors, but cannot see a close that
+/// goes through the ring (see `Driver::close_fd`).
+#[cfg(giong_tsan)]
+async fn close(fd: RawFd) -> io::Result<()> {
+    // SAFETY: the descriptor is ours and is closed exactly once.
+    if unsafe { libc::close(fd) } < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// What [`metadata`] and [`File::metadata`] report about a file.
+#[derive(Clone, Debug)]
+pub struct Metadata {
+    len: u64,
+    mode: u32,
+    modified: SystemTime,
+}
+
+impl Metadata {
+    /// Size in bytes.
+    pub fn len(&self) -> u64 {
+        self.len
+    }
+
+    /// `true` for an empty file.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// `true` for a regular file.
+    pub fn is_file(&self) -> bool {
+        self.mode & libc::S_IFMT == libc::S_IFREG
+    }
+
+    /// `true` for a directory.
+    pub fn is_dir(&self) -> bool {
+        self.mode & libc::S_IFMT == libc::S_IFDIR
+    }
+
+    /// `true` for a symbolic link (only reported by [`symlink_metadata`]).
+    pub fn is_symlink(&self) -> bool {
+        self.mode & libc::S_IFMT == libc::S_IFLNK
+    }
+
+    /// File type and permission bits, as in `st_mode`.
+    pub fn mode(&self) -> u32 {
+        self.mode
+    }
+
+    /// When the contents were last modified.
+    pub fn modified(&self) -> SystemTime {
+        self.modified
+    }
+}
+
+async fn statx(dir: types::Fd, path: CString, flags: i32) -> io::Result<Metadata> {
+    // SAFETY: all-zero is a valid `statx` (plain integers).
+    let out: Box<libc::statx> = Box::new(unsafe { mem::zeroed() });
+    let mask = libc::STATX_TYPE | libc::STATX_MODE | libc::STATX_SIZE | libc::STATX_MTIME;
+    let mut resources = (path, out);
+    let sqe = opcode::Statx::new(
+        dir,
+        resources.0.as_ptr(),
+        (&mut *resources.1 as *mut libc::statx).cast(),
+    )
+    .flags(flags)
+    .mask(mask)
+    .build();
+    let (res, _, (_path, out)) = Op::new(sqe, resources).await;
+    if res < 0 {
+        return Err(os_err(res));
+    }
+    let since_epoch = Duration::new(out.stx_mtime.tv_sec.unsigned_abs(), out.stx_mtime.tv_nsec);
+    let modified = if out.stx_mtime.tv_sec >= 0 {
+        SystemTime::UNIX_EPOCH + since_epoch
+    } else {
+        SystemTime::UNIX_EPOCH - Duration::from_secs(out.stx_mtime.tv_sec.unsigned_abs())
+            + Duration::from_nanos(out.stx_mtime.tv_nsec.into())
+    };
+    Ok(Metadata {
+        len: out.stx_size,
+        mode: out.stx_mode.into(),
+        modified,
+    })
+}
+
+/// Size, type and modification time of the file at `path`, following
+/// symbolic links.
+pub async fn metadata<P: AsRef<Path>>(path: P) -> io::Result<Metadata> {
+    statx(cwd(), c_path(path.as_ref())?, 0).await
+}
+
+/// Like [`metadata`], but describes a symbolic link itself instead of what it
+/// points at.
+pub async fn symlink_metadata<P: AsRef<Path>>(path: P) -> io::Result<Metadata> {
+    statx(cwd(), c_path(path.as_ref())?, libc::AT_SYMLINK_NOFOLLOW).await
+}
+
+/// Reads a whole file.
+pub async fn read<P: AsRef<Path>>(path: P) -> io::Result<Vec<u8>> {
+    let file = File::open(path).await?;
+    // The size is only a hint: files in /proc report 0, and a file may grow
+    // while it is being read.
+    let hint = file.metadata().await.map_or(0, |m| m.len()) as usize;
+    let mut data = Vec::with_capacity(hint.saturating_add(1));
+    let mut chunk = Vec::new();
+    loop {
+        if data.len() == data.capacity() {
+            data.reserve(data.capacity().clamp(4096, 1 << 20));
+        }
+        // Read straight into the result while it is empty (the common case
+        // of one read for the whole file), into a scratch buffer afterwards.
+        if data.is_empty() {
+            let (res, buf) = file.read_at(data, 0).await;
+            data = buf;
+            if res? == 0 {
+                return Ok(data);
+            }
+        } else {
+            chunk.clear();
+            chunk.reserve((data.capacity() - data.len()).min(1 << 20));
+            let (res, buf) = file.read_at(chunk, data.len() as u64).await;
+            chunk = buf;
+            if res? == 0 {
+                return Ok(data);
+            }
+            data.extend_from_slice(&chunk);
+        }
+    }
+}
+
+/// Writes `data` to `path`, creating the file or replacing its contents.
+///
+/// The data is not synced to the storage device; open the file yourself and
+/// call [`File::sync_all`] where that matters.
+pub async fn write<P: AsRef<Path>, B: IoBuf>(path: P, data: B) -> io::Result<()> {
+    let file = File::create(path).await?;
+    file.write_all_at(data, 0).await.0?;
+    file.close().await
+}
+
+/// Removes a file.
+pub async fn remove_file<P: AsRef<Path>>(path: P) -> io::Result<()> {
+    let path = c_path(path.as_ref())?;
+    let sqe = opcode::UnlinkAt::new(cwd(), path.as_ptr()).build();
+    path_op(path, sqe).await.map(drop)
+}
+
+/// Removes an empty directory.
+pub async fn remove_dir<P: AsRef<Path>>(path: P) -> io::Result<()> {
+    let path = c_path(path.as_ref())?;
+    let sqe = opcode::UnlinkAt::new(cwd(), path.as_ptr())
+        .flags(libc::AT_REMOVEDIR)
+        .build();
+    path_op(path, sqe).await.map(drop)
+}
+
+/// Creates a directory (permissions `0o777` before the umask).
+pub async fn create_dir<P: AsRef<Path>>(path: P) -> io::Result<()> {
+    let path = c_path(path.as_ref())?;
+    let sqe = opcode::MkDirAt::new(cwd(), path.as_ptr())
+        .mode(0o777)
+        .build();
+    path_op(path, sqe).await.map(drop)
+}
+
+/// Renames a file or directory, replacing `to` if it exists.
+pub async fn rename<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::Result<()> {
+    let paths = (c_path(from.as_ref())?, c_path(to.as_ref())?);
+    let sqe = opcode::RenameAt::new(cwd(), paths.0.as_ptr(), cwd(), paths.1.as_ptr()).build();
+    let (res, _, _paths) = Op::new(sqe, paths).await;
+    if res < 0 {
+        Err(os_err(res))
+    } else {
+        Ok(())
     }
 }

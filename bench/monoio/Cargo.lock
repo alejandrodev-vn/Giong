@@ -24,6 +24,7 @@ name = "bench-monoio"
 version = "0.1.0"
 dependencies = [
  "io-uring",
+ "libc",
  "monoio",
 ]
 

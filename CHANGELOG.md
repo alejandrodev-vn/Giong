@@ -8,10 +8,78 @@ version is `0.x`, a minor release (`0.1` → `0.2`) may contain breaking changes
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-12
+
+giong becomes a workspace of three crates: the runtime, an HTTP/1.1 server library and
+TLS. The runtime gains graceful draining, Unix sockets, multishot UDP and the rest of the
+file operations, and is now checked under ThreadSanitizer and on the io_uring setups of
+older kernels.
+
 ### Added
 
-- Logo and brand assets in `assets/`; the README shows the logo for light and dark
-  themes, and the API documentation uses the giong icon.
+- **`giong-http`** (new crate): a small, strict HTTP/1.1 server. One async handler; bodies
+  by `Content-Length` or chunked; keep-alive and pipelining; limits on head and body size;
+  timeouts for idle connections, slow requests and slow readers; graceful shutdown.
+  Requests a proxy in front could read differently (two `Content-Length` headers,
+  `Content-Length` with `Transfer-Encoding`, bare LF, folded headers) are refused with
+  `400`. `Server::serve` for TCP, `Server::serve_unix` for Unix sockets, `Server::serve_tls`
+  for HTTPS behind the `tls` feature, and the `Transport` trait with
+  `Server::serve_connection` for anything else.
+- **`giong-tls`** (new crate): server-side TLS 1.2 and 1.3 on rustls with `ring`.
+  `TlsAcceptor` and `TlsStream`; receiving is cancel safe, and a cancelled write poisons
+  the sending side of the connection instead of corrupting the record stream.
+- **Runtime**
+  - `Builder::shutdown_grace`: after a worker's main future returns, its remaining tasks
+    get this long to finish the request they are working on. `is_shutting_down()` tells a
+    task that it is time to stop taking new work.
+  - `GIONG_RING_TIER=coop|basic` forces the io_uring setup used on kernels older than 6.1,
+    so those paths can be tested on a new kernel.
+- **Networking**
+  - `UnixListener` and `UnixStream`, with the same interface as their TCP counterparts,
+    plus `UnixStream::pair`.
+  - `UdpSocket::recv_from` and `recv` on multishot `recvmsg` with the provided buffer
+    ring: cancel safe, one submission for the life of the socket, datagrams returned as a
+    `Datagram` borrowed from the worker's pool (`Datagram::is_truncated` reports one that
+    was longer than a pool buffer). `UdpSocket::set_broadcast`.
+- **Files**
+  - `File::metadata`, `fs::metadata` and `fs::symlink_metadata` (`statx`), with `Metadata`
+    (`len`, `is_file`, `is_dir`, `is_symlink`, `mode`, `modified`).
+  - `fs::read`, `fs::write`, `fs::rename`, `fs::remove_file`, `fs::remove_dir`,
+    `fs::create_dir`, and `OpenOptions::custom_flags`.
+- **Verification**
+  - `scripts/check.sh`: the whole suite repeated in release mode, on all three io_uring
+    setup tiers, and under ThreadSanitizer. CI runs all of it, plus a build with Rust 1.80.
+  - Sanitizer builds (`--cfg giong_tsan`) close descriptors with `close(2)` instead of
+    through the ring, which ThreadSanitizer cannot see and reported as races on reused
+    descriptor numbers.
+  - 169 tests across the three crates (87 in 0.1).
+- **Benchmarks**: `giong-http` in `bench/run.sh`; a two-core run; `bench/tls.sh` (HTTPS
+  against Axum + rustls) and `bench/fs.sh` (file I/O against Tokio and blocking `std`).
+  Every benchmark server now starts one worker per CPU it is allowed to run on.
+- **Documentation**: logo and brand assets in `assets/`; the README shows the logo for
+  light and dark themes, and the API documentation uses the giong icon.
+
+### Changed
+
+- **Breaking:** `UdpSocket::recv_from(buf)` and `recv(buf)`, which read into a buffer of
+  the caller's, are now called `read_from(buf)` and `read(buf)`, matching
+  `TcpStream::read`. The names `recv_from()` and `recv()` now belong to the multishot,
+  pool-buffer variants, matching `TcpStream::recv`. The two kinds must not be mixed on one
+  socket: after `recv_from`, `read_from` fails with `InvalidInput`.
+- The benchmark's `giong` entry is `bench/giong`, the same program as the Monoio, Tokio and
+  epoll servers; `examples/http.rs` is no longer measured. All recorded results were
+  measured again on a 4-vCPU machine.
+
+### Known limitations
+
+- A one-off read that is dropped (`TcpStream::read`, `UdpSocket::read_from`,
+  `File::read_at` on a pipe or device) can still take data. Use `recv` and `recv_from`
+  where a read has to be cancel safe.
+- No real 6.0 kernel was available: the fallback setups are exercised by forcing them on
+  6.18.
+- `giong-tls` has no client side and has not had an independent security audit; the
+  cryptography and the protocol are rustls's.
+- Still no asynchronous DNS, no HTTP/2 and no streaming HTTP bodies.
 
 ## [0.1.0] - 2026-11-11
 
@@ -84,5 +152,6 @@ timers and cross-thread messaging. Not production-tested; see the limitations in
 - The declared minimum Rust version (1.80) and the fallback paths for kernel 6.0 have not
   been exercised yet.
 
-[Unreleased]: https://github.com/thekivashyn/Giong/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/thekivashyn/Giong/releases/tag/v0.1.0
+[Unreleased]: https://github.com/giong-run/Giong/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/giong-run/Giong/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/giong-run/Giong/releases/tag/v0.1.0

@@ -147,6 +147,7 @@ struct Config {
     ring_entries: u32,
     buf_count: u16,
     buf_size: usize,
+    shutdown_grace: Duration,
 }
 
 /// Everything a worker thread owns. Reached through a thread-local.
@@ -164,6 +165,10 @@ pub(crate) struct Worker {
     spin: Option<Duration>,
     /// Tasks on this worker waiting for a shutdown request.
     shutdown_waiters: RefCell<Slab<Waker>>,
+    /// How long remaining tasks may keep running after the main future is done.
+    shutdown_grace: Duration,
+    /// The main future is done and the remaining tasks are being drained.
+    draining: Cell<bool>,
 }
 
 thread_local! {
@@ -206,6 +211,8 @@ impl Worker {
             next_task_uid: Cell::new(1),
             spin: cfg.spin,
             shutdown_waiters: RefCell::new(Slab::new()),
+            shutdown_grace: cfg.shutdown_grace,
+            draining: Cell::new(false),
         }))
     }
 
@@ -238,28 +245,68 @@ impl Worker {
         let mut output = None;
         self.queue.borrow_mut().push_back(MAIN_TASK);
 
-        self.drive(&mut || {
-            if output.is_none() {
-                main.clear_queued();
-                let mut cx = Context::from_waker(&waker);
-                if let Poll::Ready(value) = fut.as_mut().poll(&mut cx) {
-                    output = Some(value);
+        self.drive(
+            &mut || {
+                if output.is_none() {
+                    main.clear_queued();
+                    let mut cx = Context::from_waker(&waker);
+                    if let Poll::Ready(value) = fut.as_mut().poll(&mut cx) {
+                        output = Some(value);
+                    }
                 }
-            }
-            output.is_some()
-        });
+                output.is_some()
+            },
+            &|| false,
+        );
+        self.drain(&main, &waker);
         output.expect("giong: event loop exited before the main future completed")
+    }
+
+    /// Graceful shutdown: after the main future is done, keeps running the
+    /// remaining tasks until none are left or the grace period is over.
+    fn drain(&self, main: &TaskWaker, waker: &Waker) {
+        if self.shutdown_grace.is_zero() || self.tasks.borrow().len() == 0 {
+            return;
+        }
+        // From here on `shutdown_signal()` resolves on this worker, so tasks
+        // know to finish what they are doing and stop taking new work.
+        self.draining.set(true);
+        self.wake_shutdown_waiters();
+
+        // The deadline is an ordinary timer owned by the main task slot.
+        let mut deadline = pin!(crate::time::sleep(self.shutdown_grace));
+        let mut expired = false;
+        self.queue.borrow_mut().push_back(MAIN_TASK);
+        self.drive(
+            &mut || {
+                if !expired {
+                    main.clear_queued();
+                    let mut cx = Context::from_waker(waker);
+                    expired = deadline.as_mut().poll(&mut cx).is_ready();
+                }
+                expired
+            },
+            &|| self.tasks.borrow().len() == 0,
+        );
+    }
+
+    fn wake_shutdown_waiters(&self) {
+        let waiters = self.shutdown_waiters.borrow_mut().take_all();
+        for waker in waiters {
+            waker.wake();
+        }
     }
 
     /// The event loop: run tasks → enter the kernel → fire timers → repeat.
     ///
     /// `poll_main` polls the main future and returns `true` once it is done.
-    fn drive(&self, poll_main: &mut dyn FnMut() -> bool) {
+    /// `idle` is checked after every batch of tasks and also ends the loop.
+    fn drive(&self, poll_main: &mut dyn FnMut() -> bool, idle: &dyn Fn() -> bool) {
         let mut done = false;
         loop {
             self.drain_injected();
             self.run_tasks(&mut || done = poll_main());
-            if done {
+            if done || idle() {
                 break;
             }
 
@@ -351,12 +398,7 @@ impl Worker {
                 // A panic while building the future is treated like a panic in
                 // a task: it must not take the worker down.
                 Inject::Run(f) => drop(panic::catch_unwind(panic::AssertUnwindSafe(f))),
-                Inject::Shutdown => {
-                    let waiters = self.shutdown_waiters.borrow_mut().take_all();
-                    for waker in waiters {
-                        waker.wake();
-                    }
-                }
+                Inject::Shutdown => self.wake_shutdown_waiters(),
             }
         }
     }
@@ -425,6 +467,7 @@ pub struct Builder {
     buf_size: usize,
     signals: bool,
     spin: Option<Duration>,
+    shutdown_grace: Duration,
 }
 
 impl Default for Builder {
@@ -445,6 +488,7 @@ impl Builder {
             buf_size: 8 * 1024,
             signals: false,
             spin: None,
+            shutdown_grace: Duration::ZERO,
         }
     }
 
@@ -500,12 +544,51 @@ impl Builder {
         self
     }
 
+    /// Graceful shutdown: once a worker's main future has completed, keep
+    /// running that worker's remaining tasks for up to `grace`, so they can
+    /// finish what they are doing. Tasks still alive after that are dropped.
+    /// Default: zero, which drops the remaining tasks at once.
+    ///
+    /// While a worker drains, [`shutdown_signal`] and [`until_shutdown`]
+    /// resolve on it, which is how a task learns that it should wrap up:
+    ///
+    /// ```no_run
+    /// # use std::time::Duration;
+    /// # async fn handle(_: &giong::net::TcpStream, _: &[u8]) {}
+    /// giong::Builder::new()
+    ///     .shutdown_on_signals(true)
+    ///     .shutdown_grace(Duration::from_secs(10))
+    ///     .build()?
+    ///     .run(|_worker| async {
+    ///         let listener = giong::net::TcpListener::bind("0.0.0.0:8080").expect("bind");
+    ///         // Stop accepting as soon as a shutdown is requested...
+    ///         while let Some(Ok(stream)) = giong::until_shutdown(listener.accept()).await {
+    ///             giong::spawn(async move {
+    ///                 // ...and let each connection finish the request it is
+    ///                 // working on, then close instead of waiting for another.
+    ///                 while let Some(Ok(data)) = giong::until_shutdown(stream.recv()).await {
+    ///                     if data.is_empty() {
+    ///                         return;
+    ///                     }
+    ///                     handle(&stream, &data).await;
+    ///                 }
+    ///             });
+    ///         }
+    ///     })?;
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
+    pub fn shutdown_grace(mut self, grace: Duration) -> Self {
+        self.shutdown_grace = grace;
+        self
+    }
+
     fn config(&self) -> Config {
         Config {
             spin: self.spin,
             ring_entries: self.ring_entries,
             buf_count: self.buf_count,
             buf_size: self.buf_size,
+            shutdown_grace: self.shutdown_grace,
         }
     }
 
@@ -582,7 +665,8 @@ impl Runtime {
     ///
     /// `f` is called once on each worker thread (with the worker's index) to
     /// build that worker's main future; a worker finishes when its main future
-    /// completes, at which point its remaining tasks are dropped. Because each
+    /// completes, at which point its remaining tasks are dropped (after the
+    /// grace period set with [`Builder::shutdown_grace`], if any). Because each
     /// future is created on the thread that runs it, it may be `!Send`.
     ///
     /// A panic in a worker's main future shuts the runtime down and is
@@ -789,20 +873,26 @@ impl Drop for SignalGuard {
 }
 
 /// Waits for the signal handler to poke the eventfd, then requests shutdown.
+///
+/// Ends as soon as a shutdown is requested by any other means, so that it never
+/// keeps a draining worker alive.
 async fn watch_signals(fd: RawFd) {
-    let mut buf: Vec<u8> = Vec::with_capacity(8);
-    loop {
-        let sqe = opcode::Read::new(types::Fd(fd), buf.as_mut_ptr(), 8).build();
-        let (res, _, b) = Op::new(sqe, buf).await;
-        buf = b;
-        if res > 0 {
-            handle().shutdown();
-            return;
+    until_shutdown(async {
+        let mut buf: Vec<u8> = Vec::with_capacity(8);
+        loop {
+            let sqe = opcode::Read::new(types::Fd(fd), buf.as_mut_ptr(), 8).build();
+            let (res, _, b) = Op::new(sqe, buf).await;
+            buf = b;
+            if res > 0 {
+                handle().shutdown();
+                return;
+            }
+            if res != -libc::EINTR && res != -libc::EAGAIN {
+                return;
+            }
         }
-        if res != -libc::EINTR && res != -libc::EAGAIN {
-            return;
-        }
-    }
+    })
+    .await;
 }
 
 // ---------------------------------------------------------------------- handle
@@ -892,7 +982,7 @@ impl ShutdownSignal {
                 return;
             }
             let waker = try_with_worker(|w| {
-                if w.shared.uid == uid {
+                if w.shared.uid == uid && !w.draining.get() {
                     w.shutdown_waiters
                         .try_borrow_mut()
                         .ok()
@@ -910,7 +1000,7 @@ impl Future for ShutdownSignal {
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        if self.rt.shutdown.load(Ordering::SeqCst) {
+        if self.rt.shutdown.load(Ordering::SeqCst) || with_worker(|w| w.draining.get()) {
             self.key = None;
             return Poll::Ready(());
         }
@@ -945,7 +1035,9 @@ impl Drop for ShutdownSignal {
 }
 
 /// Resolves once a shutdown of the current runtime has been requested, via
-/// [`Handle::shutdown`] or a signal (see [`Builder::shutdown_on_signals`]).
+/// [`Handle::shutdown`] or a signal (see [`Builder::shutdown_on_signals`]), or
+/// once the current worker's main future has completed and the worker is
+/// draining its remaining tasks (see [`Builder::shutdown_grace`]).
 ///
 /// # Panics
 ///
@@ -956,6 +1048,17 @@ pub fn shutdown_signal() -> ShutdownSignal {
         key: None,
         _not_send: PhantomData,
     }
+}
+
+/// `true` once [`shutdown_signal`] would resolve on the current worker: a
+/// shutdown has been requested, or the worker is draining its remaining tasks.
+/// A cheap check for loops that are busy rather than waiting.
+///
+/// # Panics
+///
+/// Panics when called outside of a giong runtime.
+pub fn is_shutting_down() -> bool {
+    with_worker(|w| w.rt.shutdown.load(Ordering::Relaxed) || w.draining.get())
 }
 
 /// Runs `fut` until it completes or a shutdown is requested, whichever comes

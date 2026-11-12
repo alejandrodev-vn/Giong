@@ -108,23 +108,41 @@ async fn serve(mut stream: TcpStream) {
     }
 }
 
-fn main() {
-    // Not pinned here: the benchmark script pins the process with taskset.
-    // GLOMMIO_SPIN_US=<microseconds> turns on busy-polling before sleeping.
-    let mut builder = LocalExecutorBuilder::new(Placement::Unbound);
-    if let Some(us) = std::env::var("GLOMMIO_SPIN_US").ok().and_then(|v| v.parse().ok()) {
-        builder = builder.spin_before_park(std::time::Duration::from_micros(us));
+/// CPUs this process may run on (the benchmark scripts set them with taskset).
+fn allowed_cpus() -> Vec<usize> {
+    // SAFETY: plain libc call filling a zeroed cpu_set_t.
+    unsafe {
+        let mut set: libc::cpu_set_t = std::mem::zeroed();
+        libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut set);
+        (0..libc::CPU_SETSIZE as usize).filter(|&i| libc::CPU_ISSET(i, &set)).collect()
     }
-    builder
-        .spawn(|| async move {
-            let listener = TcpListener::bind("127.0.0.1:3008").expect("bind");
-            loop {
-                if let Ok(stream) = listener.accept().await {
-                    glommio::spawn_local(serve(stream)).detach();
-                }
+}
+
+fn main() {
+    // One executor per CPU the process is allowed to run on, each with its own
+    // listener. GLOMMIO_SPIN_US=<microseconds> turns on busy-polling before
+    // sleeping.
+    let spin = std::env::var("GLOMMIO_SPIN_US").ok().and_then(|v| v.parse().ok());
+    let workers: Vec<_> = allowed_cpus()
+        .into_iter()
+        .map(|cpu| {
+            let mut builder = LocalExecutorBuilder::new(Placement::Fixed(cpu));
+            if let Some(us) = spin {
+                builder = builder.spin_before_park(std::time::Duration::from_micros(us));
             }
+            builder
+                .spawn(|| async move {
+                    let listener = TcpListener::bind("127.0.0.1:3008").expect("bind");
+                    loop {
+                        if let Ok(stream) = listener.accept().await {
+                            glommio::spawn_local(serve(stream)).detach();
+                        }
+                    }
+                })
+                .expect("glommio executor")
         })
-        .expect("glommio executor")
-        .join()
-        .expect("glommio executor panicked");
+        .collect();
+    for worker in workers {
+        worker.join().expect("glommio executor panicked");
+    }
 }

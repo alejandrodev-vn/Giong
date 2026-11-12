@@ -1,0 +1,31 @@
+[package]
+name = "giong-http"
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.80"
+description = "A small, strict HTTP/1.1 server for the giong thread-per-core runtime"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/giong-run/Giong"
+documentation = "https://docs.rs/giong-http"
+keywords = ["http", "server", "io-uring", "thread-per-core", "async"]
+categories = ["web-programming::http-server", "network-programming"]
+
+[features]
+# HTTPS through `Server::serve_tls`, using giong-tls (rustls).
+tls = ["dep:giong-tls"]
+
+[dependencies]
+giong = { path = "..", version = "0.2.0" }
+giong-tls = { path = "../giong-tls", version = "0.2.0", optional = true }
+
+[dev-dependencies]
+rcgen = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+
+[[test]]
+name = "tls"
+required-features = ["tls"]
+
+[package.metadata.docs.rs]
+all-features = true

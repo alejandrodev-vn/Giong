@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Verification beyond a plain `cargo test`.
+#
+#   scripts/check.sh test       release tests, repeated (default 5 rounds)
+#   scripts/check.sh fallback   the same tests on the io_uring setup tiers used
+#                               by kernels older than 6.1 (COOP_TASKRUN, no flags)
+#   scripts/check.sh tsan       all tests under ThreadSanitizer (needs nightly
+#                               with the rust-src component)
+#   scripts/check.sh all        everything above
+#
+# ROUNDS=n changes how often each test binary is repeated.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+ROUNDS="${ROUNDS:-5}"
+
+repeat_tests() {
+    local label="$1"
+    for round in $(seq 1 "$ROUNDS"); do
+        echo "== $label: round $round/$ROUNDS"
+        cargo test --release --quiet --workspace --all-features
+    done
+}
+
+run_test() {
+    repeat_tests "default ring"
+}
+
+run_fallback() {
+    for tier in coop basic; do
+        GIONG_RING_TIER="$tier" repeat_tests "ring tier '$tier'"
+    done
+}
+
+run_tsan() {
+    local target
+    target="$(rustc -vV | sed -n 's/^host: //p')"
+    # TSan queues an asynchronous signal until the receiving thread next calls
+    # an intercepted libc function. giong's threads sit in raw io_uring_enter
+    # and futex syscalls, so the SIGTERM handler would never run and the test
+    # would hang. It runs in every non-sanitizer job instead.
+    local skip=(--skip sigterm_triggers_a_graceful_shutdown)
+    # `--cfg giong_tsan` makes giong close sockets with close(2) instead of
+    # IORING_OP_CLOSE, which TSan cannot see (see Driver::close_fd).
+    for round in $(seq 1 "$ROUNDS"); do
+        echo "== ThreadSanitizer: round $round/$ROUNDS"
+        RUSTFLAGS="-Zsanitizer=thread --cfg giong_tsan" \
+        TSAN_OPTIONS="halt_on_error=1" \
+        CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tsan" \
+            cargo +nightly test -Zbuild-std --target "$target" --tests --quiet --workspace --all-features \
+            -- "${skip[@]}"
+    done
+}
+
+case "${1:-all}" in
+    test) run_test ;;
+    fallback) run_fallback ;;
+    tsan) run_tsan ;;
+    all) run_test; run_fallback; run_tsan ;;
+    *) echo "usage: $0 [test|fallback|tsan|all]" >&2; exit 2 ;;
+esac
+echo "ok"

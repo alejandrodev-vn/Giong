@@ -22,7 +22,7 @@ SERVER_CPU=${SERVER_CPU:-1}
 LOAD_CPU=${LOAD_CPU:-0}
 ENDPOINT=${ENDPOINT:-json}
 OUT=${OUT:-results/scale}
-read -r -a NAMES <<<"${SERVERS:-giong giong-spin monoio-tuned tokio-raw native-epoll glommio}"
+read -r -a NAMES <<<"${SERVERS:-giong giong-spin giong-http monoio-tuned tokio-raw native-epoll glommio}"
 read -r -a CONNS <<<"${CONNS:-1 50 1000 5000}"
 TICKS=$(getconf CLK_TCK)
 mkdir -p "$OUT"
@@ -30,11 +30,12 @@ CSV="$OUT/raw.csv"
 ulimit -n "$(ulimit -Hn)"
 
 echo "building..." >&2
-for d in giong tokio-raw native-epoll monoio glommio; do (cd "$d" && cargo build --release -q); done
+for d in giong giong-http tokio-raw native-epoll monoio glommio; do (cd "$d" && cargo build --release -q); done
 
 declare -A CMD=(
   [giong]="giong/target/release/bench-giong"
   [giong-spin]="env GIONG_SPIN_US=200 giong/target/release/bench-giong"
+  [giong-http]="giong-http/target/release/bench-giong-http"
   [monoio]="monoio/target/release/bench-monoio"
   [monoio-tuned]="env MONOIO_RING=defer monoio/target/release/bench-monoio"
   [tokio-raw]="tokio-raw/target/release/bench-tokio-raw"
@@ -42,7 +43,7 @@ declare -A CMD=(
   [glommio]="glommio/target/release/bench-glommio"
   [glommio-spin]="env GLOMMIO_SPIN_US=200 glommio/target/release/bench-glommio"
 )
-declare -A PORT=([giong]=3006 [giong-spin]=3006 [monoio]=3007 [monoio-tuned]=3007
+declare -A PORT=([giong]=3006 [giong-spin]=3006 [giong-http]=3009 [monoio]=3007 [monoio-tuned]=3007
   [tokio-raw]=3005 [native-epoll]=3004 [glommio]=3008 [glommio-spin]=3008)
 
 cpu_ticks() { cat /proc/"$1"/task/*/stat 2>/dev/null | awk '{u+=$14; s+=$15} END{print u+0, s+0}'; }

@@ -8,9 +8,9 @@
 
 ## Checklist
 
-- [ ] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass
+- [ ] `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings` and `scripts/check.sh test` pass
 - [ ] New behaviour has tests, including what happens when an operation is dropped mid-flight
-- [ ] Every new `unsafe` block has a `// SAFETY:` comment, and `scripts/valgrind.sh` is clean
+- [ ] Every new `unsafe` block has a `// SAFETY:` comment, and `scripts/valgrind.sh` and `scripts/check.sh tsan` are clean
 - [ ] Performance claims come with before/after numbers and the method
 - [ ] `CHANGELOG.md` has an entry under "Unreleased" for user-visible changes
 - [ ] The pull request title follows the commit convention in `CONTRIBUTING.md`

@@ -13,10 +13,13 @@ fn main() -> std::io::Result<()> {
         let socket = UdpSocket::bind(&addr)?;
         println!("udp echo on {}", socket.local_addr()?);
         // One buffer for the whole lifetime of the server: it goes into each
-        // operation by value and comes back with the result.
+        // operation by value and comes back with the result. `read_from` takes
+        // a buffer of our own, so a datagram of any size is echoed whole; a
+        // server whose datagrams fit a pool buffer would use the multishot
+        // `recv_from()` instead.
         let mut buf = Vec::with_capacity(64 * 1024);
         loop {
-            let (res, b) = socket.recv_from(buf).await;
+            let (res, b) = socket.read_from(buf).await;
             let (_len, peer) = res?;
             let (res, b) = socket.send_to(b, peer).await;
             res?;

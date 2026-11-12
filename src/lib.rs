@@ -19,7 +19,9 @@
 //! * **Multishot accept and receive** with kernel-provided buffers: one
 //!   submission per listener / connection, no buffer pinned by idle
 //!   connections.
-//! * **TCP, UDP and files**, all through the ring. See [`net`] and [`fs`].
+//! * **One ring for everything.** TCP, UDP and Unix sockets ([`net`]) and
+//!   files ([`fs`]) all go through the worker's io_uring. File I/O needs no
+//!   pool of blocking threads.
 //! * **A latency dial.** [`Builder::spin_before_park`] lets a worker watch its
 //!   ring instead of sleeping, for services where microseconds matter more
 //!   than an idle core.
@@ -60,8 +62,8 @@
 //! platforms.
 
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/thekivashyn/Giong/main/assets/giong-icon.svg",
-    html_favicon_url = "https://raw.githubusercontent.com/thekivashyn/Giong/main/assets/giong-icon.svg"
+    html_logo_url = "https://raw.githubusercontent.com/giong-run/Giong/main/assets/giong-icon.svg",
+    html_favicon_url = "https://raw.githubusercontent.com/giong-run/Giong/main/assets/giong-icon.svg"
 )]
 
 #[cfg(not(target_os = "linux"))]
@@ -82,8 +84,8 @@ pub mod time;
 pub use buf::{IoBuf, IoBufMut, RecvBuf};
 pub use executor::{spawn, yield_now, JoinError, JoinHandle};
 pub use runtime::{
-    block_on, handle, shutdown_signal, until_shutdown, worker_id, Builder, Handle, Runtime,
-    ShutdownSignal,
+    block_on, handle, is_shutting_down, shutdown_signal, until_shutdown, worker_id, Builder,
+    Handle, Runtime, ShutdownSignal,
 };
 
 #[doc(hidden)]

@@ -1,30 +1,36 @@
-tokio-raw       143040 req/s | per request: 0.74 us user + 4.97 us kernel = 5.72 us | kernel share 87%
-              2.038 syscalls per request (217708 calls / 106829 requests)
-                sendto           106879 calls
-                recvfrom         106936 calls
-                epoll_wait       3623 calls
-                accept4          53 calls
-native-epoll    149359 req/s | per request: 0.40 us user + 4.89 us kernel = 5.29 us | kernel share 92%
-              2.024 syscalls per request (219524 calls / 108474 requests)
-                write            108524 calls
-                read             108525 calls
-                epoll_wait       2218 calls
-                close            51 calls
-glommio         113663 req/s | per request: 1.26 us user + 7.32 us kernel = 8.59 us | kernel share 85%
-              2.100 syscalls per request (50307 calls / 23951 requests)
-                sendto           24000 calls
-                recvfrom         24051 calls
-                io_uring_enter   1947 calls
+tokio-raw       170348 req/s | per request: 0.84 us user + 4.08 us kernel = 4.92 us | kernel share 83%
+              2.049 syscalls per request (54979 calls / 26829 requests)
+                sendto           26878 calls
+                recvfrom         26929 calls
+                epoll_wait       906 calls
+                epoll_ctl        102 calls
+native-epoll    160421 req/s | per request: 0.39 us user + 4.10 us kernel = 4.49 us | kernel share 91%
+              2.033 syscalls per request (57519 calls / 28296 requests)
+                write            28345 calls
+                read             28347 calls
+                epoll_wait       569 calls
+                epoll_ctl        102 calls
+monoio          134405 req/s | per request: 0.38 us user + 6.83 us kernel = 7.21 us | kernel share 95%
+              0.041 syscalls per request (21675 calls / 534939 requests)
+                io_uring_enter   21624 calls
+                setsockopt       51 calls
+monoio-tuned    169612 req/s | per request: 0.57 us user + 4.06 us kernel = 4.64 us | kernel share 88%
+              0.041 syscalls per request (22760 calls / 548822 requests)
+                io_uring_enter   22709 calls
+                setsockopt       51 calls
+glommio         143370 req/s | per request: 1.33 us user + 5.55 us kernel = 6.89 us | kernel share 81%
+              2.097 syscalls per request (60240 calls / 28730 requests)
+                sendto           28779 calls
+                recvfrom         28830 calls
+                io_uring_enter   2320 calls
                 fcntl            153 calls
-monoio          123301 req/s | per request: 0.35 us user + 7.60 us kernel = 7.96 us | kernel share 96%
-              0.053 syscalls per request (24607 calls / 467568 requests)
-                io_uring_enter   24556 calls
+giong           176088 req/s | per request: 0.65 us user + 3.77 us kernel = 4.42 us | kernel share 85%
+              0.032 syscalls per request (18885 calls / 599394 requests)
+                io_uring_enter   18833 calls
                 setsockopt       51 calls
-monoio-tuned    155590 req/s | per request: 0.43 us user + 5.05 us kernel = 5.48 us | kernel share 92%
-              0.114 syscalls per request (60335 calls / 529727 requests)
-                io_uring_enter   60284 calls
+giong-http      197621 req/s | per request: 1.22 us user + 3.59 us kernel = 4.81 us | kernel share 75%
+              0.033 syscalls per request (15047 calls / 459702 requests)
+                io_uring_enter   14927 calls
+                shutdown         51 calls
                 setsockopt       51 calls
-giong           158811 req/s | per request: 0.46 us user + 4.87 us kernel = 5.34 us | kernel share 91%
-              0.131 syscalls per request (67656 calls / 515123 requests)
-                io_uring_enter   67605 calls
-                setsockopt       51 calls
+                mprotect         18 calls

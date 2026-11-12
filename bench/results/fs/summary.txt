@@ -1,0 +1,18 @@
+workload      tasks  runtime     ops/s median       min       max
+small-files       1  std               555927    542190    627139
+small-files       1  giong             226792    200605    242807
+small-files       1  tokio             147164    139810    154424
+small-files       1  tokio-all          28714     27926     29718
+
+small-files      64  giong             292064    268966    316581
+small-files      64  tokio             115582    111798    139893
+small-files      64  tokio-all          81155     76936     84666
+
+random-read       1  std              1395072   1341621   1463828
+random-read       1  giong            1013596    868332   1152886
+random-read       1  tokio             183558    171371    187689
+random-read       1  tokio-all          33054     32020     34465
+
+random-read      64  giong            1259617   1216538   1294114
+random-read      64  tokio             155717    101204    174726
+random-read      64  tokio-all          74455     72170     80232
