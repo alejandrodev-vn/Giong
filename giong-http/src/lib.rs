@@ -1,0 +1,67 @@
+//! # giong-http
+//!
+//! A small, strict HTTP/1.1 server for the [giong] thread-per-core
+//! runtime.
+//!
+//! ```no_run
+//! use giong::net::TcpListener;
+//! use giong_http::{Request, Response, Server};
+//!
+//! async fn handler(req: Request) -> Response {
+//!     match (req.method(), req.path()) {
+//!         ("GET", "/health") => Response::text("ok"),
+//!         ("POST", "/echo") => Response::new(200).body(req.body().to_vec()),
+//!         _ => Response::new(404),
+//!     }
+//! }
+//!
+//! fn main() -> std::io::Result<()> {
+//!     giong::Builder::new()
+//!         .shutdown_on_signals(true)
+//!         .shutdown_grace(std::time::Duration::from_secs(10))
+//!         .build()?
+//!         .run(|_worker| async {
+//!             // One listener per worker; the kernel spreads connections.
+//!             let listener = TcpListener::bind("0.0.0.0:8080").expect("bind");
+//!             Server::new().serve(listener, handler).await;
+//!         })
+//! }
+//! ```
+//!
+//! ## What it does
+//!
+//! * HTTP/1.1 and HTTP/1.0, keep-alive, pipelining (responses to pipelined
+//!   requests are sent in one write).
+//! * Request bodies with `Content-Length` or chunked encoding, fully received
+//!   before the handler runs; `Expect: 100-continue`.
+//! * Limits on head and body size, timeouts for idle connections, slow
+//!   requests and slow readers.
+//! * Graceful shutdown: requests in progress are answered, idle connections
+//!   close.
+//! * Strict parsing. Requests that a proxy in front might read differently
+//!   (two lengths, a length plus chunked encoding, whitespace before a colon,
+//!   bare line feeds, folded headers) are rejected with `400`.
+//!
+//! ## What it does not do (yet)
+//!
+//! HTTP/2, streaming bodies, compression, routing.
+//!
+//! ## HTTPS
+//!
+//! With the `tls` feature, [`Server::serve_tls`] serves the same handlers over
+//! TLS, using the `giong-tls` crate (rustls).
+
+#![warn(missing_docs)]
+
+mod chunked;
+mod date;
+#[cfg(test)]
+mod fuzz_tests;
+mod parse;
+mod request;
+mod response;
+mod server;
+
+pub use request::Request;
+pub use response::{Body, Response};
+pub use server::{Server, Transport};
