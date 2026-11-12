@@ -27,7 +27,7 @@ AUTHOR_URL = "https://github.com/thekivashyn"
 
 # Flip to True once giong, giong-http and giong-tls are published on crates.io:
 # the install commands switch to `cargo add giong` and docs.rs links appear.
-ON_CRATES_IO = False
+ON_CRATES_IO = True
 CRATE_NAMES = ["giong", "giong-http", "giong-tls"]
 
 
