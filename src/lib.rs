@@ -82,8 +82,8 @@ pub mod time;
 pub use buf::{IoBuf, IoBufMut, RecvBuf};
 pub use executor::{spawn, yield_now, JoinError, JoinHandle};
 pub use runtime::{
-    block_on, handle, shutdown_signal, until_shutdown, worker_id, Builder, Handle, Runtime,
-    ShutdownSignal,
+    block_on, handle, is_shutting_down, shutdown_signal, until_shutdown, worker_id, Builder,
+    Handle, Runtime, ShutdownSignal,
 };
 
 #[doc(hidden)]

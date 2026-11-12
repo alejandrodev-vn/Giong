@@ -1,5 +1,6 @@
 //! A small HTTP/1.1 server on giong: keep-alive, pipelining, idle timeouts,
-//! header size limit, graceful shutdown on SIGINT/SIGTERM.
+//! header size limit, graceful shutdown on SIGINT/SIGTERM (in-flight requests
+//! are answered before the process exits).
 //!
 //!     cargo run --release --example http -- 127.0.0.1:3006
 //!     curl localhost:3006/json
@@ -15,7 +16,7 @@
 use std::cell::RefCell;
 use std::hint::black_box;
 use std::io::Write;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use giong::net::{TcpListener, TcpStream};
 use giong::time::{sleep, timeout};
@@ -24,6 +25,12 @@ use giong::time::{sleep, timeout};
 const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 /// A peer that does not read our response for this long is dropped.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
+/// After SIGINT/SIGTERM, connections get this long to finish the request they
+/// are working on before the worker drops them.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
+/// How long the server keeps picking up connections and requests that were
+/// already on their way when the shutdown began.
+const SHUTDOWN_LINGER: Duration = Duration::from_millis(100);
 /// Upper bound for a request head (and for buffered partial requests).
 const MAX_HEAD: usize = 64 * 1024;
 /// Upper bound for a request body, which this server reads and discards.
@@ -185,10 +192,23 @@ async fn serve(stream: TcpStream) {
     let _ = stream.set_nodelay(true);
     // Bytes of a request that has not arrived completely yet (usually empty).
     let mut pending: Vec<u8> = Vec::new();
+    let mut closing = false;
 
     loop {
         // `recv` is cancel safe, so wrapping it in a timeout loses no data.
-        let chunk = match timeout(IDLE_TIMEOUT, stream.recv()).await {
+        // `until_shutdown` only interrupts the wait *between* requests: a
+        // response that is being written is always finished first, within
+        // `SHUTDOWN_GRACE`.
+        let received = match giong::until_shutdown(timeout(IDLE_TIMEOUT, stream.recv())).await {
+            Some(received) => received,
+            None => {
+                // The server is stopping. Serve a request that was already on
+                // its way, then close instead of keeping the connection alive.
+                closing = true;
+                timeout(SHUTDOWN_LINGER, stream.recv()).await
+            }
+        };
+        let chunk = match received {
             Ok(Ok(chunk)) if !chunk.is_empty() => chunk,
             _ => return, // idle for too long, error, or closed by the peer
         };
@@ -225,7 +245,7 @@ async fn serve(stream: TcpStream) {
                 _ => return,
             }
         }
-        if close {
+        if close || closing {
             return; // dropping the stream closes the connection
         }
     }
@@ -235,7 +255,9 @@ fn main() -> std::io::Result<()> {
     let addr = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "127.0.0.1:3006".into());
-    let mut builder = giong::Builder::new().shutdown_on_signals(true);
+    let mut builder = giong::Builder::new()
+        .shutdown_on_signals(true)
+        .shutdown_grace(SHUTDOWN_GRACE);
     if let Some(n) = std::env::var("GIONG_WORKERS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -264,6 +286,18 @@ fn main() -> std::io::Result<()> {
                     }
                 }
             }
+            // Shutting down. Connections that were established just before the
+            // signal are still picked up, so their requests get an answer.
+            let deadline = Instant::now() + SHUTDOWN_LINGER;
+            loop {
+                let left = deadline.saturating_duration_since(Instant::now());
+                match timeout(left, listener.accept()).await {
+                    Ok(Ok(stream)) => drop(giong::spawn(serve(stream))),
+                    _ => break,
+                }
+            }
+            // Returning ends this worker's main future; the runtime now gives
+            // the connection tasks up to `SHUTDOWN_GRACE` to finish.
         }
     })
 }
